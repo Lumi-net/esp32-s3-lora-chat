@@ -1,0 +1,30 @@
+#include "spi.h"
+#include "driver/gpio.h"
+#include "driver/spi_master.h"
+
+spi_device_handle_t spi2_handle;
+
+void spi_init()
+{
+    spi_bus_config_t spibus_structure = {
+        .flags = SPICOMMON_BUSFLAG_MASTER,
+        .intr_flags = 0,
+        .isr_cpu_id = ESP_INTR_CPU_AFFINITY_AUTO,
+        .max_transfer_sz = 240*240*2,
+        .miso_io_num = GPIO_NUM_16,
+        .mosi_io_num = GPIO_NUM_13,
+        .quadhd_io_num = -1,
+        .quadwp_io_num = -1,
+        .sclk_io_num = GPIO_NUM_14,
+    };
+    spi_bus_initialize(SPI2_HOST, &spibus_structure, SPI_DMA_CH_AUTO);
+
+    spi_device_interface_config_t spidevice_structure = {
+        .clock_source = SPI_CLK_SRC_DEFAULT,
+        .clock_speed_hz = 60000000,
+        .mode = 0,
+        .queue_size = 7,
+        .spics_io_num = GPIO_NUM_16,
+    };
+    spi_bus_add_device(SPI2_HOST, &spidevice_structure, &spi2_handle);
+}
