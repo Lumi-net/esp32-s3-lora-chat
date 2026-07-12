@@ -11,8 +11,13 @@ typedef enum
     RX_RECEIVE_DATA
 } RxState;
 
+typedef enum {
+    SEND_STATE_IDLE,         // 空闲状态
+    SEND_STATE_WAITING_ACK   // 等待 ACK 状态
+} SendState;
+
 typedef struct {
-    uint8_t random_num;
+    uint8_t seq;
     uint8_t self_id;
     uint8_t target_id;
     uint8_t month;
@@ -32,5 +37,23 @@ typedef enum {
     PARSE_ERR_CRC     = 4,  // CRC校验失败
     PARSE_ERR_READ    = 5   // 读取不完整（LoRa超时丢字节）
 } ParseStatus;
+
+typedef struct __attribute__((packed))
+{
+    uint16_t magic;        // 0xAA55
+} ChatRecordHeader;
+
+typedef struct
+{
+    uint16_t magic;
+    uint8_t active_block;
+} meta_t;
+
+// 读取游标，用于支持跨 A/B 块的连续读取
+typedef struct {
+    uint8_t physical_block; // 当前正在读取的物理块 (0: Block A, 1: Block B)
+    uint32_t offset;        // 当前块内的偏移量
+    uint8_t stage;          // 读取阶段 (0: 正在读第一个块, 1: 正在读第二个块)
+} chat_cursor_t;
 
 #endif

@@ -1,7 +1,14 @@
 #include "uart.h"
+#include "driver/uart.h"
+#include "driver/gpio.h"
+// #include "esp_random.h"
+#include <string.h>
+#include "va.h"
+#include "event.h"
 
 uint8_t self_id = 0x01;
-int length = 0 ;
+static uint8_t tx_seq_num = 0;
+int length = 0;
 uint8_t ch;
 static RxState rx_state = RX_WAIT_AA;
 static uint8_t rx_buf[131];
@@ -76,7 +83,8 @@ uint8_t buildLoRaFrame(uint8_t* buf, uint8_t self_id, uint8_t target_id, const c
     buf[0] = 0xAA;
     buf[1] = 0x55;
     // 1. 随机数 (使用ESP32硬件RNG)
-    buf[2] = esp_random() & 0xFF;
+    // buf[2] = esp_random() & 0xFF;
+    buf[2] = tx_seq_num++; // 改为使用递增的序号 到FF自动溢出回00
 
     // 2. ID
     buf[3] = self_id;
@@ -94,7 +102,7 @@ uint8_t buildLoRaFrame(uint8_t* buf, uint8_t self_id, uint8_t target_id, const c
     //     buf[3] = 1; buf[4] = 1; buf[5] = 0; buf[6] = 0;
     // }
 
-    buf[5] = 1; buf[6] = 1; buf[7] = 0; buf[8] = 0; // 测试时间戳
+    buf[5] = 1; buf[6] = 1; buf[7] = 0; buf[8] = 0; // 测试时间戳 TODO: 从RTC获取时间
 
     // 4. 数据长度 & 数据内容
     size_t len = strlen(data_str);
@@ -103,7 +111,7 @@ uint8_t buildLoRaFrame(uint8_t* buf, uint8_t self_id, uint8_t target_id, const c
     memcpy(&buf[10], data_str, len);
 
     // 5. 校验和 (CRC8)
-    uint8_t crc = calculateCRC8(buf, 10 + len);
+    uint8_t crc = calculateCRC8(&buf[2], 8 + len);
     buf[10 + len] = crc;
 
     return 10 + len + 1; // 返回实际帧总长度
@@ -118,11 +126,11 @@ ParseStatus parseLoRaFrame(const uint8_t* buf, uint8_t buf_len, LoRaFrameData* o
     if (buf_len != expected_len) return PARSE_ERR_LEN; // 长度不匹配
 
     // 校验 CRC8
-    uint8_t calc_crc = calculateCRC8(buf, 10 + data_len);
+    uint8_t calc_crc = calculateCRC8(&buf[2], 10 + data_len);
     if (calc_crc != buf[10 + data_len]) return PARSE_ERR_CRC;
 
     // 填充结构体
-    out->random_num = buf[2];
+    out->seq = buf[2];
     out->self_id    = buf[3];
     out->target_id  = buf[4];
     out->month      = buf[5];
@@ -133,10 +141,37 @@ ParseStatus parseLoRaFrame(const uint8_t* buf, uint8_t buf_len, LoRaFrameData* o
     out->checksum   = buf[10 + data_len];
 
     // 安全拷贝字符串并添加结束符
-    memcpy(out->data_str, &buf[10], data_len);
-    out->data_str[data_len] = '\0';
+    if (data_len > 0) {
+        memcpy(out->data_str, &buf[10], data_len);
+        out->data_str[data_len] = '\0';
+    } else {
+        out->data_str[0] = '\0'; // ACK帧没有数据
+    }
 
     return PARSE_OK;
+}
+
+void uart_transmit(const uint8_t* data, size_t size) {
+    uart_write_bytes(UART_NUM_1, data, size);
+}
+
+void send_ack(uint8_t original_seq, uint8_t original_sender_id) {
+    uint8_t ack_buf[11];
+    ack_buf[0] = 0xAA;
+    ack_buf[1] = 0x55;
+    ack_buf[2] = original_seq;       // 匹配原数据帧的seq
+    ack_buf[3] = self_id;               // ACK 发送方 (自己)
+    ack_buf[4] = original_sender_id;    // ACK 接收方 (原发送方)
+    
+    ack_buf[5] = 1; ack_buf[6] = 1; ack_buf[7] = 0; ack_buf[8] = 0; // 时间戳 TODO
+    
+    ack_buf[9] = 0; // 数据长度为 0 表示这是 ACK 帧
+    
+    // CRC8 计算范围同数据帧
+    uint8_t crc = calculateCRC8(&ack_buf[2], 8);
+    ack_buf[10] = crc;
+    
+    uart_transmit(ack_buf, 11);
 }
 
 void uart_parse_byte(uint8_t ch)
@@ -195,10 +230,32 @@ void uart_parse_byte(uint8_t ch)
                         &frame_data);
                 if(ret == PARSE_OK)
                 {
-                    UIEvent event;
-                    event.type = EVENT_UART;
-                    event.frame = frame_data;
-                    xQueueSend(appQueue, &event, 0);
+                    // 判断帧类型：data_len > 0 为数据帧，data_len == 0 为 ACK 帧
+                    if (frame_data.data_len > 0) 
+                    {
+                        // 数据帧：判断 target_id 是否为自己 (如果是广播 target_id=0xFF，可根据需求修改判断条件)
+                        if (frame_data.target_id == self_id) 
+                        {
+                            // 发送 ACK 给原发送方
+                            send_ack(frame_data.seq, frame_data.self_id); // 此处self_id即对方发来的自己的ID，ACK中为接收方ID
+                        }
+                        
+                        UIEvent event;
+                        event.type = EVENT_UART;
+                        event.frame = frame_data;
+                        xQueueSend(appQueue, &event, 0);
+                    }
+                    else 
+                    {
+                        // ACK 帧：判断 target_id 是否为自己 (确保是回复给自己的 ACK)
+                        if (frame_data.target_id == self_id) 
+                        {
+                            UIEvent event;
+                            event.type = EVENT_UART; // 复用 EVENT_UART，应用层通过 data_len == 0 区分
+                            event.frame = frame_data;
+                            xQueueSend(appQueue, &event, 0);
+                        }
+                    }
                 }
                 rx_state = RX_WAIT_AA;
                 rx_idx = 0;
@@ -215,10 +272,6 @@ void uart_receive(void *arg)
         {
             uart_parse_byte(ch);
         }
-        vTaskDelay(5);
     }
 }
 
-void uart_transmit(const uint8_t* data, size_t size) {
-    uart_write_bytes(UART_NUM_1, data, size);
-}

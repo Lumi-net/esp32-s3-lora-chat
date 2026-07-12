@@ -1,11 +1,7 @@
 #ifndef __UI_H__
 #define __UI_H__
 
-#include "SHIFT.h"
-#include "LOCK.h"
-#include "lcd.h"
 #include "lvgl.h"
-#include "va.h"
 
 extern lv_obj_t *g_ta;
 extern lv_obj_t *input_cnt_left;
@@ -17,5 +13,8 @@ void lvgl_tick_task(void *arg);
 void create_ui(void);
 void chat_add_message(const char *time, const char *text);
 void ui_show_chat_page(void);
+void ui_show_menu_page(void);
+void ui_show_settings_page(void);
+void show_toast_dialog(const char *msg, uint32_t auto_close_ms);
 
 #endif

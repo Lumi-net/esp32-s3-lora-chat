@@ -1,16 +1,13 @@
 #ifndef __MYUART_H__
 #define __MYUART_H__
 
-#include "driver/uart.h"
-#include "driver/gpio.h"
-#include "esp_random.h"
-#include <string.h>
-#include "queue.h"
-#include "event.h"
+#include <stdint.h>
+#include <stddef.h>
 #include "types.h"
 
 extern uint8_t self_id;
 extern uint8_t receive_data[1024];
+uint8_t calculateCRC8(const uint8_t* data, uint8_t len);
 void uart_init(void);
 void uart_receive(void *arg);
 void uart_transmit(const uint8_t *data, size_t size);

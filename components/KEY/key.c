@@ -3,7 +3,7 @@
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
-#include "queue.h"
+#include "va.h"
 
 bool keyPressed = false;
 uint8_t lastKey = 0;
@@ -104,18 +104,17 @@ uint8_t scanKey() {
             switch (currentKey) {
                 case 1: case 2: case 3: case 5: case 6: case 7: case 9: case 10: case 11: case 14: // 数字键
                     if (waited_to_choose) {
-                        waited_to_choose = false; // 您的设计：取消等待
+                        waited_to_choose = false;
                     } else if (locked) {
-                        choose = 5;               // 外部定义的锁定功能码
+                        choose = 5;
                         lockfun = currentKey;
                     } else {
                         waited_to_choose = true;
-                        wait_choose = num_to_char[currentKey]; // 查表获取数字字符
+                        wait_choose = num_to_char[currentKey];
                     }
                     break;
-                case 4: case 8: case 12: case 16: // 候选键
+                case 4: case 8: case 12: case 16: // 候选
                     if (waited_to_choose) {
-                        // 确定候选表
                         const char (*current_table)[10];
                         if (currentKey == 4) current_table = candidate1;
                         else if (currentKey == 8) current_table = candidate2;

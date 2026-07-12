@@ -1,7 +1,13 @@
 #include "ui.h"
 
+#include "SHIFT.h"
+#include "LOCK.h"
+#include "lcd.h"
+#include "va.h"
+
 #define LVGL_BUF_LINES (320 / 4) // 1/4 屏缓冲
 #define LVGL_BUF_SIZE (LVGL_BUF_LINES * 240)
+#define MENU_VISIBLE_ITEMS 10
 
 
 lv_display_t *lv_disp = NULL;
@@ -12,7 +18,14 @@ lv_obj_t *menu_page = NULL;
 lv_obj_t *g_ta = NULL;
 lv_obj_t *input_cnt_left = NULL;
 uint8_t input_remaining_chars = 0;
-lv_obj_t *chat_cursor;
+lv_obj_t *chat_cursor = NULL;
+static lv_obj_t * g_current_toast = NULL;
+
+static lv_obj_t *items[MENU_VISIBLE_ITEMS];
+static char item_text[MENU_VISIBLE_ITEMS][3];
+
+static uint8_t selected = 0;
+static uint8_t first_visible = 0;
 
 void lvgl_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map)
 {
@@ -195,6 +208,36 @@ void create_ui(void) {
     lv_obj_add_state(g_ta, LV_STATE_FOCUSED);
 }
 
+// 定时器回调：直接操作全局变量
+static void toast_auto_close_cb(lv_timer_t * timer)
+{
+    if (g_current_toast != NULL) {
+        lv_msgbox_close(g_current_toast); // 关闭弹窗及背景
+        g_current_toast = NULL;           // 清空指针
+    }
+    lv_timer_delete(timer); // 销毁定时器
+}
+
+// 自动消失弹窗函数
+void show_toast_dialog(const char *msg, uint32_t auto_close_ms) 
+{
+    // 1. 防止重复创建：如果上一个弹窗还没消失，先强制关掉它
+    if (g_current_toast != NULL) {
+        lv_msgbox_close(g_current_toast);
+        g_current_toast = NULL;
+    }
+
+    // 2. 创建新的弹窗
+    g_current_toast = lv_msgbox_create(lv_screen_active());
+    lv_obj_add_flag(lv_msgbox_get_header(g_current_toast), LV_OBJ_FLAG_HIDDEN); // 隐藏标题栏和叉号 太丑了
+    lv_msgbox_add_title(g_current_toast, "提示");
+    lv_msgbox_add_text(g_current_toast, msg);
+    lv_obj_center(g_current_toast);
+
+    // 3. 创建定时器（user_data 传 NULL 即可，因为我们用全局变量）
+    lv_timer_create(toast_auto_close_cb, auto_close_ms, NULL);
+}
+
 void chat_add_message(const char *time, const char *text)
 {
     lv_obj_t *item = lv_obj_create(chat_page);
@@ -287,12 +330,88 @@ void ui_show_chat_page(void)
                           LV_FLEX_ALIGN_START);
 }
 
+void menu_refresh(void)
+{
+    uint8_t visible =
+        (chat_cnt < MENU_VISIBLE_ITEMS) ?
+        chat_cnt : MENU_VISIBLE_ITEMS;
+
+    for(uint8_t i = 0; i < visible; i++)
+    {
+        uint8_t idx = first_visible + i;
+
+        snprintf(item_text[i],
+                 sizeof(item_text[i]),
+                 "%02X",
+                 chat_list[idx].id);
+
+        lv_label_set_text(items[i], item_text[i]);
+    }
+
+    if(visible)
+    {
+        lv_obj_align_to(chat_cursor,
+                        items[selected - first_visible],
+                        LV_ALIGN_OUT_LEFT_MID,
+                        -8,
+                        0);
+    }
+}
+
+void menu_down(void)
+{
+    if(selected + 1 >= chat_cnt)
+        return;
+
+    selected++;
+
+    if(selected >= first_visible + MENU_VISIBLE_ITEMS)
+    {
+        first_visible++;
+        menu_refresh();
+    }
+    else
+    {
+        lv_obj_align_to(chat_cursor,
+                        items[selected - first_visible],
+                        LV_ALIGN_OUT_LEFT_MID,
+                        -8,
+                        0);
+    }
+}
+
+void menu_up(void)
+{
+    if(selected == 0)
+        return;
+
+    selected--;
+
+    if(selected < first_visible)
+    {
+        first_visible--;
+        menu_refresh();
+    }
+    else
+    {
+        lv_obj_align_to(chat_cursor,
+                        items[selected - first_visible],
+                        LV_ALIGN_OUT_LEFT_MID,
+                        -8,
+                        0);
+    }
+}
+
+uint8_t menu_get_chat_id(void)
+{
+    return chat_list[selected].id;
+}
+
 void ui_show_menu_page(void)
 {
     if(cur_page)
         lv_obj_delete(cur_page);
 
-    
     cur_page = lv_obj_create(page_container);
 
     lv_obj_remove_style_all(cur_page);
@@ -311,13 +430,13 @@ void ui_show_menu_page(void)
                                &lv_font_montserrat_12,
                                0);
 
-    item_cnt = sizeof(chat_list) / sizeof(chat_list[0]);
+    uint8_t visible =
+        (chat_cnt < MENU_VISIBLE_ITEMS) ?
+        chat_cnt : MENU_VISIBLE_ITEMS;
 
-    for(int i = 0; i < item_cnt; i++)
+    for(uint8_t i = 0; i < visible; i++)
     {
         items[i] = lv_label_create(menu_page);
-
-        lv_label_set_text(items[i], chat_list[i]);
 
         lv_obj_set_style_text_color(items[i],
                                     lv_color_white(),
@@ -334,10 +453,9 @@ void ui_show_menu_page(void)
     }
 
     selected = 0;
+    first_visible = 0;
 
-    lv_obj_align_to(cursor,
-                    items[0],
-                    LV_ALIGN_OUT_LEFT_MID,
-                    -8,
-                    0);
+    menu_refresh();
 }
+
+void ui_show_settings_page(void);

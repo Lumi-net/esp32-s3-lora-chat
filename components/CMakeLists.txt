@@ -1,6 +1,5 @@
 set(src_dirs
             UART
-            TYPES
             APP
             PWM
             SPI
@@ -12,7 +11,6 @@ set(src_dirs
 
 set(include_dirs
             UART
-            TYPES
             APP
             PWM
             SPI
@@ -27,6 +25,8 @@ set(requires
             esp_timer
             esp_driver_spi
             esp_lcd
+            spi_flash
+            nvs_flash
             lvgl)
 
 idf_component_register(SRC_DIRS ${src_dirs} INCLUDE_DIRS ${include_dirs} REQUIRES ${requires})
