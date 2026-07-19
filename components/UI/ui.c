@@ -79,7 +79,8 @@ static const char *settings_items[] = {
     "Change Interface Color",
     "Wi-Fi (For Time)",
     "Time",
-    "Auto Sleep Time"
+    "Auto Sleep Time",
+    "Change Brightness",
 };
 
 #define SETTINGS_COUNT (sizeof(settings_items) / sizeof(settings_items[0]))
@@ -1033,6 +1034,30 @@ void ui_show_settings_time(void) {
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
+void ui_show_settings_time(void) {
+    // 1. 清理旧页面
+    if (cur_page) {
+        lv_obj_delete(cur_page);
+        cur_page = NULL;
+    }
+
+    // 2. 创建新页面
+    cur_page = lv_obj_create(page_container);
+    lv_obj_remove_style_all(cur_page);
+    lv_obj_set_size(cur_page, lv_pct(100), lv_pct(100));
+    
+    current_page_id = PAGE_SETTINGS_DETAIL;
+    current_detail_step = DETAIL_STEP_INPUT_ID; // 初始状态为输入 ID(实则并不是ID 但是为了少写点代码 就这样吧)
+    target_change_id = 0xFF;
+
+    // 3. 创建 UI: 标题
+    detail_title_label = lv_label_create(cur_page);
+    lv_label_set_text(detail_title_label, "Enter Brightness\n10~100\nDefault: 50");
+    lv_obj_set_style_text_color(detail_title_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
+    lv_obj_set_style_text_font(detail_title_label, &jbm14, 0);
+    lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
+}
+
 void ui_show_settings_sleep_time(void) {
     // 1. 清理旧页面
     if (cur_page) {
@@ -1237,6 +1262,37 @@ void handle_settings_detail_enter(void) {
                 ESP_LOGW("SETTINGS", "Invalid Sleep Time: %d", time);
                 // UI 反馈：显示错误并清空，让用户重试
                 lv_label_set_text(detail_title_label, "Invalid Time! Try again. Max 65535.");
+                lv_textarea_set_text(g_ta, "");
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                return;
+            }
+        }
+        else if (selected == 6) { // "Change Brightness"
+            if (strlen(safe_input) == 0) return; // 空输入忽略
+
+            uint16_t brightness;
+            bool ok = parse_uint16(safe_input, &brightness, 10, 16);
+
+            // 验证 ID 是否有效
+            if (ok && brightness <= 100 && brightness >= 10) {
+                esp_err_t err = nvs_set_brightness(brightness*10);
+                if (err == ESP_OK) {
+                    ESP_LOGI("SETTINGS", "Brightness Set OK: %u", brightness);
+                    lv_label_set_text(detail_title_label, "OK!");
+                    lv_textarea_set_text(g_ta, "");
+                    vTaskDelay(pdMS_TO_TICKS(2000));
+                    ui_show_settings_page();
+                } else {
+                    ESP_LOGW("SETTINGS", "Brightness Set Failed: %u", brightness);
+                    lv_label_set_text(detail_title_label, "Something was wrong...\nPlease try again.");
+                    lv_textarea_set_text(g_ta, "");
+                    vTaskDelay(pdMS_TO_TICKS(2000));
+                    ui_show_settings_page();
+                }
+            } else {
+                ESP_LOGW("SETTINGS", "Invalid brightness: %u", brightness);
+                // UI 反馈：显示错误并清空，让用户重试
+                lv_label_set_text(detail_title_label, "Invalid Brightness! Try again. 10~100.");
                 lv_textarea_set_text(g_ta, "");
                 vTaskDelay(pdMS_TO_TICKS(2000));
                 return;

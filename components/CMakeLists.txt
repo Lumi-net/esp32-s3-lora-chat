@@ -10,6 +10,7 @@ set(src_dirs
             IMAGES
             WIFI
             FONTS
+            SLEEP
             KEY)
 
 set(include_dirs
@@ -24,6 +25,7 @@ set(include_dirs
             IMAGES
             WIFI
             FONTS
+            SLEEP
             KEY)
 
 set(requires

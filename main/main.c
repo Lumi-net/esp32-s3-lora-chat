@@ -14,13 +14,12 @@
 #include "va.h"
 #include "key.h"
 #include "flash.h"
+#include "sleep.h"
 #include "mynvs.h"
 #include "wifi.h"
-// TODO: 低功耗
 // TODO: 在状态栏加上当前状态和电量显示(INA219)
 #define INIT_DONE_BIT (1 << 0) // 定义初始化完成的事件位
 #define ACK_TIMEOUT_MS 3000 // ACK 超时时间为 3 秒
-#define SLEEP_TIMEOUT_MS (60 * 1000) // 60秒无操作自动休眠 (单位：毫秒)
 
 static EventGroupHandle_t init_event_group;
 // static QueueHandle_t appQueue;
@@ -33,42 +32,14 @@ static uint8_t pending_target_id = 0;   // 缓存目标ID，用于收到ACK后�
 static uint32_t send_start_time = 0;    // 记录发送开始的时间戳
 static char pending_payload[121] = {0}; // 缓存发送的内容
 
-static void enter_light_sleep(void)
-{
-    ESP_LOGI("POWER", "No activity for %d ms. Entering Light Sleep...", SLEEP_TIMEOUT_MS);
-
-    // 1. 关闭屏幕背光以最大化省电 (请根据你的实际函数名修改)
-    duty_set(0);
-
-    // 2. 配置 UART 唤醒 (假设你的 LoRa 使用的是 UART_NUM_1，请根据实际情况修改)
-    // 阈值设为 1，表示接收到 1 个字符的电平变化即唤醒
-    uart_set_wakeup_threshold(UART_NUM_1, 1);
-    esp_sleep_enable_uart_wakeup(UART_NUM_1);
-
-    // 3. 配置 GPIO 唤醒 (可选，强烈推荐：让用户按任意键也能唤醒)
-    // 假设你的按键中断 GPIO 是 GPIO_NUM_0，且低电平有效。请替换为你实际的按键 GPIO 号！
-    // gpio_wakeup_enable(GPIO_NUM_0, GPIO_INTR_LOW_LEVEL);
-    // esp_sleep_enable_gpio_wakeup();
-
-    // 4. 进入 Light-sleep (此函数会阻塞，直到被唤醒)
-    esp_light_sleep_start();
-
-    // ================= 唤醒后执行从这里开始 =================
-    ESP_LOGI("POWER", "Woke up from Light Sleep!");
-    
-    // 5. 恢复屏幕背光
-    // pwm_set_duty(MAX_DUTY); 或 backlight_on();
-
-    // 6. 重置活动计时器，防止唤醒后立即再次判定超时
-    reset_sleep_timer();
-}
-
 void app_main_task(void *arg)
 {
     UIEvent event;
     uint8_t key;
     bool is_initialized = false;
     WifiProvisioningState current_wifi_state = WIFI_STATE_IDLE;
+    int64_t quick_sleep_deadline_us = 0; 
+    bool just_woken_up_by_aux = false; 
 
     while (1)
     {
@@ -123,10 +94,22 @@ void app_main_task(void *arg)
                             LoRaFrameData msg_frame = {0};
                             msg_frame.self_id = self_id;
                             msg_frame.target_id = pending_target_id;
-                            msg_frame.month = 0;  // TODO: 替换为真实月份
-                            msg_frame.day = 0;    // TODO: 替换为真实日期
-                            msg_frame.hour = 0;   // TODO: 替换为真实小时
-                            msg_frame.minute = 0; // TODO: 替换为真实分钟
+
+                            struct timeval tv;
+                            gettimeofday(&tv, NULL);
+                            struct tm *timeinfo = localtime(&tv.tv_sec);
+                            if (timeinfo->tm_year >= (2024 - 1900)) {
+                                msg_frame.month = timeinfo->tm_mon + 1;   // tm_mon 范围是 0-11，需要 +1
+                                msg_frame.day = timeinfo->tm_mday;        // tm_mday 范围是 1-31
+                                msg_frame.hour = timeinfo->tm_hour;       // tm_hour 范围是 0-23
+                                msg_frame.minute = timeinfo->tm_min;      // tm_min 范围是 0-59
+                            } else {
+                                msg_frame.month = 0;
+                                msg_frame.day = 0;
+                                msg_frame.hour = 0;
+                                msg_frame.minute = 0;
+                                ESP_LOGW("APP", "RTC time not synced yet, sending 00:00");
+                            }
 
                             uint16_t pld_len = strlen(pending_payload); // payload_len
                             if (pld_len > 129) pld_len = 129; 
@@ -159,10 +142,25 @@ void app_main_task(void *arg)
                     }
                     else
                     {
-                        if (event.frame.target_id == 0xFF && event.frame.data_len >= 2 &&  strncmp(event.frame.data_str, "HB", 2) == 0) // 收到心跳
+                        if (event.frame.target_id == 0xFF && event.frame.data_len >= 2 && strncmp(event.frame.data_str, "HB", 2) == 0) // 收到心跳
                         {
-                            // 收到心跳广播：更新 RTC 时间戳 TODO: 从RTC获取时间
-                            chat_list[event.frame.self_id].last_time = event.frame.month * 1000000 + event.frame.day * 10000 + event.frame.hour * 100 + event.frame.minute;
+                            // 收到心跳广播：更新时间戳
+                            struct timeval tv;
+                            gettimeofday(&tv, NULL);
+                            struct tm *timeinfo = localtime(&tv.tv_sec);
+                            
+                            uint8_t cur_month = 0, cur_day = 0, cur_hour = 0, cur_minute = 0;
+                            if (timeinfo->tm_year >= (2024 - 1900)) {
+                                cur_month = timeinfo->tm_mon + 1;
+                                cur_day = timeinfo->tm_mday;
+                                cur_hour = timeinfo->tm_hour;
+                                cur_minute = timeinfo->tm_min;
+                            }
+                            
+                            chat_list[event.frame.self_id].last_time = cur_month * 1000000 + 
+                                                                    cur_day * 10000 + 
+                                                                    cur_hour * 100 + 
+                                                                    cur_minute;
                         }
                         else { // 收到消息 UART收到消息会先发ACK再传队列 这里不需要发了
                             esp_err_t err = chat_storage_append(&event.frame);
@@ -178,8 +176,13 @@ void app_main_task(void *arg)
                             if (g_chat_target_id == event.frame.self_id) {
                                 ui_chat_append_new_message(&event.frame);
                             }
+                            
                         }
-                        
+                    }
+                    if (just_woken_up_by_aux) {
+                        quick_sleep_deadline_us = esp_timer_get_time() + 2000000; // 覆盖之前的 500ms 保底时间
+                        just_woken_up_by_aux = false; // 消费标志
+                        ESP_LOGI("APP", "UART processed after AUX wakeup, will quick sleep in 2000ms.");
                     }
                 }
                 else if (event.type == EVENT_KEY)
@@ -344,6 +347,38 @@ void app_main_task(void *arg)
                     }
                 }
             }
+
+            { // 睡觉检查
+                // 安全检查：只有在非关键业务状态下才允许进入睡眠
+                // 1. 没有正在等待 LoRa 的 ACK
+                // 2. WiFi 处于空闲或已连接状态（不在配网/连接过程中）
+                bool is_system_idle = (send_state == SEND_STATE_IDLE) && 
+                                    (current_wifi_state == WIFI_STATE_IDLE || current_wifi_state == WIFI_STATE_CONNECTED);
+
+                bool should_sleep = false;
+                
+                // 优先级 1：检查“收到消息后的快速睡眠”
+                if (quick_sleep_deadline_us > 0) {
+                    if (esp_timer_get_time() >= quick_sleep_deadline_us) {
+                        should_sleep = true;
+                        quick_sleep_deadline_us = 0; // 消费掉标志，准备入睡
+                    }
+                } 
+                // 优先级 2：检查“无操作超时睡眠”
+                else if (is_system_idle && check_and_enter_sleep()) {
+                    should_sleep = true;
+                }
+
+                if (is_system_idle && should_sleep) {
+                    int wakeup_src = enter_light_sleep();
+                    if (wakeup_src == 2) {
+                        just_woken_up_by_aux = true; 
+                        // 【保底】如果 AUX 误唤醒，5000ms 内没收到 UART 数据，也强制睡觉
+                        quick_sleep_deadline_us = esp_timer_get_time() + 5000000;
+                    }
+                }
+            }
+            
         }
         lv_timer_handler();
         vTaskDelay(pdMS_TO_TICKS(5));

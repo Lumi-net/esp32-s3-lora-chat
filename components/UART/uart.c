@@ -142,19 +142,23 @@ uint8_t buildLoRaFrame(uint8_t* buf, uint8_t self_id, uint8_t target_id, const c
     buf[3] = self_id;
     buf[4] = target_id;
 
-    // 3. 时间戳 (MMDDHHMM)
-    // struct tm timeinfo;
-    // if (getLocalTime(&timeinfo)) {
-    //     buf[3] = (uint8_t)(timeinfo.tm_mon + 1); // tm_mon: 0~11
-    //     buf[4] = (uint8_t)timeinfo.tm_mday;
-    //     buf[5] = (uint8_t)timeinfo.tm_hour;
-    //     buf[6] = (uint8_t)timeinfo.tm_min;
-    // } else {
-    //     // 若未同步时间，使用默认值 00:00 01月01日 (可根据需求调整)
-    //     buf[3] = 1; buf[4] = 1; buf[5] = 0; buf[6] = 0;
-    // }
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    struct tm *timeinfo = localtime(&tv.tv_sec);
 
-    buf[5] = 1; buf[6] = 1; buf[7] = 0; buf[8] = 0; // 测试时间戳 TODO: 从RTC获取时间
+    if (timeinfo->tm_year >= (2024 - 1900)) {
+        buf[5] = timeinfo->tm_mon + 1;   // tm_mon 范围是 0-11，需要 +1
+        buf[6] = timeinfo->tm_mday;        // tm_mday 范围是 1-31
+        buf[7] = timeinfo->tm_hour;       // tm_hour 范围是 0-23
+        buf[8] = timeinfo->tm_min;      // tm_min 范围是 0-59
+    } else {
+        // 刚开机? 时间默认是 1970 年，这里填 0
+        buf[5] = 0;
+        buf[6] = 0;
+        buf[7] = 0;
+        buf[8] = 0;
+        ESP_LOGW("APP", "RTC time not synced yet, sending 00:00");
+    }
 
     // 4. 数据长度 & 数据内容
     size_t len = strlen(data_str);
@@ -222,8 +226,25 @@ void send_ack(uint8_t original_seq, uint8_t original_sender_id) {
     ack_buf[4] = 0x55;
     ack_buf[5] = original_seq;       
     ack_buf[6] = self_id;               
-    ack_buf[7] = original_sender_id;    
-    ack_buf[8] = 1; ack_buf[9] = 1; ack_buf[10] = 0; ack_buf[11] = 0; // 时间戳 TODO
+    ack_buf[7] = original_sender_id;
+    
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    struct tm *timeinfo = localtime(&tv.tv_sec);
+    if (timeinfo->tm_year >= (2024 - 1900)) {
+        ack_buf[5] = timeinfo->tm_mon + 1;   // tm_mon 范围是 0-11，需要 +1
+        ack_buf[6] = timeinfo->tm_mday;        // tm_mday 范围是 1-31
+        ack_buf[7] = timeinfo->tm_hour;       // tm_hour 范围是 0-23
+        ack_buf[8] = timeinfo->tm_min;      // tm_min 范围是 0-59
+    } else {
+        // 刚开机? 时间默认是 1970 年，这里填 0
+        ack_buf[5] = 0;
+        ack_buf[6] = 0;
+        ack_buf[7] = 0;
+        ack_buf[8] = 0;
+        ESP_LOGW("APP", "RTC time not synced yet, sending 00:00");
+    }
+
     ack_buf[12] = 0; // 数据长度为 0 表示 ACK
     
     // 3. CRC8 校验 (计算范围同数据帧，从 seq 开始的 8 字节)

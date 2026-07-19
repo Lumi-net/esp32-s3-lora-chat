@@ -3,6 +3,7 @@
 #include "nvs_flash.h"
 #include "esp_log.h"
 #include "va.h"
+#include "pwm.h"
 
 static const char *TAG = "NVS";
 
@@ -154,15 +155,41 @@ esp_err_t nvs_set_sleep_time(uint16_t time) {
         return err;
     }
 
-    // 使用 "uc_" 作为颜色专属前缀，例如 "uc_5"
-    char key[16];
-    snprintf(key, sizeof(key), "st_%u", (unsigned)time);
-
-    err = nvs_set_u16(handle, key, time);
+    err = nvs_set_u16(handle, "st", time);
 
     if (err == ESP_OK) {
         auto_sleep_timeout = time; // 同步更新内存
         ESP_LOGI(TAG, "Saved Auto Sleep Time %u to NVS and RAM", time);
+    }
+
+    if (err == ESP_OK) {
+        nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return err;
+}
+
+esp_err_t nvs_set_brightness(uint16_t brightness) {
+    if (brightness > 1000) {
+        ESP_LOGE(TAG, "Brightness too high! Max is 1000");
+        return ESP_ERR_INVALID_ARG;
+    } else if (brightness < 100) {
+        ESP_LOGE(TAG, "Brightness too low! Min is 100");
+        return ESP_ERR_INVALID_ARG;
+    }
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error opening NVS handle: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = nvs_set_u16(handle, "br", brightness);
+
+    if (err == ESP_OK) {
+        scr_brightness = brightness; // 同步更新内存
+        duty_set(brightness);
+        ESP_LOGI(TAG, "Saved Brightness %u to NVS and RAM", brightness);
     }
 
     if (err == ESP_OK) {
@@ -186,7 +213,7 @@ void nvs_read_all_alias_to_list(void) {
     
     nvs_iterator_t it = NULL;
     // 查找nvs分区下idname命名空间中的所有字符串类型Key
-    esp_err_t res = nvs_entry_find("nvs", NVS_NAMESPACE, NVS_TYPE_STR, &it);
+    nvs_entry_find("nvs", NVS_NAMESPACE, NVS_TYPE_STR, &it);
     
     int count = 0;
     while (it != NULL) {
@@ -220,7 +247,7 @@ void nvs_read_all_alias_to_list(void) {
             }
         }
         
-        res = nvs_entry_next(&it); // 移动到下一个
+        nvs_entry_next(&it); // 移动到下一个
     }
     
     ESP_LOGI(TAG, "--- Total found: %d items ---", count);
@@ -246,7 +273,7 @@ void nvs_read_all_user_color_to_list(void) {
 
     nvs_iterator_t it = NULL;
     // 颜色是 uint32_t，所以这里查找 NVS_TYPE_U32
-    esp_err_t res = nvs_entry_find("nvs", NVS_NAMESPACE, NVS_TYPE_U32, &it);
+    nvs_entry_find("nvs", NVS_NAMESPACE, NVS_TYPE_U32, &it);
     
     int count = 0;
     while (it != NULL) {
@@ -279,7 +306,7 @@ void nvs_read_all_user_color_to_list(void) {
             }
         }
         
-        res = nvs_entry_next(&it); // 移动到下一个
+        nvs_entry_next(&it); // 移动到下一个
     }
     
     ESP_LOGI(TAG, "--- Total custom colors found: %d items ---", count);
@@ -310,7 +337,7 @@ void nvs_read_all_interface_color_to_list(void) {
 
     nvs_iterator_t it = NULL;
     // 颜色是 uint32_t，所以这里查找 NVS_TYPE_U32
-    esp_err_t res = nvs_entry_find("nvs", NVS_NAMESPACE, NVS_TYPE_U32, &it);
+    nvs_entry_find("nvs", NVS_NAMESPACE, NVS_TYPE_U32, &it);
     
     int count = 0;
     while (it != NULL) {
@@ -338,10 +365,71 @@ void nvs_read_all_interface_color_to_list(void) {
             }
         }
         
-        res = nvs_entry_next(&it); // 移动到下一个
+        nvs_entry_next(&it); // 移动到下一个
     }
     
     ESP_LOGI(TAG, "--- Total custom interface colors found: %d items ---", count);
+    
+    nvs_release_iterator(it); // 释放迭代器
+    nvs_close(handle);
+}
+
+void nvs_read_sleep_time(void) {
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS for sleep time iteration");
+        return;
+    }
+
+    nvs_iterator_t it = NULL;
+    nvs_entry_find("nvs", NVS_NAMESPACE, NVS_TYPE_U16, &it);
+
+    while (it != NULL) {
+        nvs_entry_info_t info;
+        nvs_entry_info(it, &info);
+        uint16_t time = 300;
+        if (strcmp(info.key, "st") == 0) {
+            if (nvs_get_u16(handle, info.key, &time) == ESP_OK) {
+                auto_sleep_timeout = time;
+                ESP_LOGI(TAG, "Read Sleep Time: %u", time);
+            } else {
+                ESP_LOGW(TAG, "Failed to get u16 for key: %s", info.key);
+            }
+        }
+        
+        nvs_entry_next(&it); // 移动到下一个
+    }
+    
+    nvs_release_iterator(it); // 释放迭代器
+    nvs_close(handle);
+}
+
+void nvs_read_brightness(void) {
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS for brightness iteration");
+        return;
+    }
+
+    nvs_iterator_t it = NULL;
+    nvs_entry_find("nvs", NVS_NAMESPACE, NVS_TYPE_U16, &it);
+
+    while (it != NULL) {
+        nvs_entry_info_t info;
+        nvs_entry_info(it, &info);
+        uint16_t brightness = 500;
+        if (strcmp(info.key, "br") == 0) {
+            if (nvs_get_u16(handle, info.key, &brightness) == ESP_OK) {
+                if (brightness > 1000) brightness = 1000;
+                scr_brightness = brightness;
+                ESP_LOGI(TAG, "Read Brightness: %u", brightness);
+            } else {
+                ESP_LOGW(TAG, "Failed to get u16 for key: %s", info.key);
+            }
+        }
+        
+        nvs_entry_next(&it); // 移动到下一个
+    }
     
     nvs_release_iterator(it); // 释放迭代器
     nvs_close(handle);
