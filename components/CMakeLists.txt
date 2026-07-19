@@ -5,8 +5,11 @@ set(src_dirs
             SPI
             LCD
             FLASH
+            MYNVS
             UI
             IMAGES
+            WIFI
+            FONTS
             KEY)
 
 set(include_dirs
@@ -16,8 +19,11 @@ set(include_dirs
             SPI
             LCD
             FLASH
+            MYNVS
             UI
             IMAGES
+            WIFI
+            FONTS
             KEY)
 
 set(requires
@@ -27,8 +33,11 @@ set(requires
             esp_lcd
             spi_flash
             nvs_flash
+            esp_wifi
+            esp_http_server
+            lwip
             lvgl)
 
 idf_component_register(SRC_DIRS ${src_dirs} INCLUDE_DIRS ${include_dirs} REQUIRES ${requires})
 
-component_compile_options(-ffast-math -O3 -Wno-error=format=-Wno-format)
+# component_compile_options(-ffast-math -O2 -Wno-error=format=-Wno-format)

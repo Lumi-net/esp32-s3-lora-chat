@@ -5,6 +5,8 @@
 #include "types.h"
 #include "esp_err.h"
 
+extern uint32_t g_write_offset;
+
 esp_err_t ext_flash_init(void);
 esp_err_t ext_flash_read(uint32_t addr, void *buf, size_t len);
 esp_err_t ext_flash_write(uint32_t addr, const void *buf, size_t len);
@@ -19,5 +21,6 @@ void chat_read_forward_init(chat_cursor_t *cursor);
 esp_err_t chat_storage_read_next(chat_cursor_t *cursor, LoRaFrameData *frame);
 void chat_read_backward_init(chat_cursor_t *cursor);
 esp_err_t chat_storage_read_prev(chat_cursor_t *cursor, LoRaFrameData *frame);
+void update_chat_list_last_time(void);
 
 #endif

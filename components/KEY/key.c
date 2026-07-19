@@ -101,6 +101,7 @@ uint8_t scanKey() {
     if ((esp_timer_get_time() / 1000 - lastDebounceTime) > 20) {
         if (currentKey != 0 && !keyPressed) {
             keyPressed = true;
+            last_activity_time_us = esp_timer_get_time();
             switch (currentKey) {
                 case 1: case 2: case 3: case 5: case 6: case 7: case 9: case 10: case 11: case 14: // 数字键
                     if (waited_to_choose) {

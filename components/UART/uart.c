@@ -1,10 +1,15 @@
 #include "uart.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
-// #include "esp_random.h"
+#include "esp_random.h"
 #include <string.h>
 #include "va.h"
-#include "event.h"
+#include "types.h"
+
+#define LORA_MD0 GPIO_NUM_4
+#define LORA_MD1 GPIO_NUM_5
+#define LORA_CHANNEL 0x3C    // 470 MHz
+#define LORA_GROUP   0x00    // Lumi-net组号
 
 uint8_t self_id = 0x01;
 static uint8_t tx_seq_num = 0;
@@ -52,8 +57,54 @@ static const uint8_t crc8_table[256] = {
     0xE6, 0xE1, 0xE8, 0xEF, 0xFA, 0xFD, 0xF4, 0xF3
 };
 
+
+// 唤醒 LoRa 模块 (MD0=1, MD1=0)
+void lora_wake() {
+    gpio_set_level(LORA_MD0, 1);
+    gpio_set_level(LORA_MD1, 0);
+    vTaskDelay(pdMS_TO_TICKS(150)); // 等待 T2 (120ms) + 余量，确保模块进入工作状态
+}
+
+// 让 LoRa 模块休眠 (MD0=1, MD1=1)
+void lora_sleep() {
+    vTaskDelay(pdMS_TO_TICKS(30)); // 延时确保串口数据已被 LoRa 模块完整接收
+    gpio_set_level(LORA_MD0, 1);
+    gpio_set_level(LORA_MD1, 1);
+    vTaskDelay(pdMS_TO_TICKS(15));
+}
+
+// 让 LoRa 模块配置 (MD0=0, MD1=0)
+void lora_config() {
+    gpio_set_level(LORA_MD0, 0);
+    gpio_set_level(LORA_MD1, 0);
+    vTaskDelay(pdMS_TO_TICKS(150)); // 等待 T1 (120ms) + 余量，确保模块进入配置状态
+}
+
+// 定点传输
+void lora_config_fixed_point() { 
+    lora_config();
+    // 命令格式: CMD(0x80) + REG(0x07) + LEN(0x02) + VAL(0x00, 0x02)
+    uint8_t cmd[] = {0x80, 0x07, 0x02, 0x00, 0x02}; 
+    uart_transmit(cmd, sizeof(cmd));
+    vTaskDelay(pdMS_TO_TICKS(200)); // 等待配置完成并保存
+    lora_sleep(); // 配置完成后进入休眠
+}
+
 void uart_init(void)
 {
+    // 初始化 MD0, MD1 引脚
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << LORA_MD0) | (1ULL << LORA_MD1),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&io_conf);
+    
+    // 初始化为休眠模式
+    lora_sleep();
+
     uart_config_t uart_structure = {
         .baud_rate = 9600,
         .data_bits = UART_DATA_8_BITS,
@@ -64,10 +115,11 @@ void uart_init(void)
         .stop_bits = UART_STOP_BITS_1,
     };
     uart_param_config(UART_NUM_1, &uart_structure);
-
     uart_set_pin(UART_NUM_1, GPIO_NUM_19, GPIO_NUM_20, -1, -1);
-
     uart_driver_install(UART_NUM_1, 1024, 1024, 0, NULL, 0);
+
+    // 配置模块为定点传输模式
+    lora_config_fixed_point();
 }
 
 uint8_t calculateCRC8(const uint8_t* data, uint8_t len) {
@@ -156,22 +208,31 @@ void uart_transmit(const uint8_t* data, size_t size) {
 }
 
 void send_ack(uint8_t original_seq, uint8_t original_sender_id) {
-    uint8_t ack_buf[11];
-    ack_buf[0] = 0xAA;
-    ack_buf[1] = 0x55;
-    ack_buf[2] = original_seq;       // 匹配原数据帧的seq
-    ack_buf[3] = self_id;               // ACK 发送方 (自己)
-    ack_buf[4] = original_sender_id;    // ACK 接收方 (原发送方)
+    lora_wake();
+
+    uint8_t ack_buf[14]; // 3字节路由头 + 11字节ACK帧
     
-    ack_buf[5] = 1; ack_buf[6] = 1; ack_buf[7] = 0; ack_buf[8] = 0; // 时间戳 TODO
+    // 1. 构造 3字节路由头 (目标组号 + 目标地址 + 信道)
+    ack_buf[0] = LORA_GROUP;
+    ack_buf[1] = original_sender_id; // ACK 的目标是原发送方
+    ack_buf[2] = LORA_CHANNEL;
     
-    ack_buf[9] = 0; // 数据长度为 0 表示这是 ACK 帧
+    // 2. 构造 11字节 ACK 帧
+    ack_buf[3] = 0xAA;
+    ack_buf[4] = 0x55;
+    ack_buf[5] = original_seq;       
+    ack_buf[6] = self_id;               
+    ack_buf[7] = original_sender_id;    
+    ack_buf[8] = 1; ack_buf[9] = 1; ack_buf[10] = 0; ack_buf[11] = 0; // 时间戳 TODO
+    ack_buf[12] = 0; // 数据长度为 0 表示 ACK
     
-    // CRC8 计算范围同数据帧
-    uint8_t crc = calculateCRC8(&ack_buf[2], 8);
-    ack_buf[10] = crc;
+    // 3. CRC8 校验 (计算范围同数据帧，从 seq 开始的 8 字节)
+    uint8_t crc = calculateCRC8(&ack_buf[5], 8);
+    ack_buf[13] = crc;
     
-    uart_transmit(ack_buf, 11);
+    uart_transmit(ack_buf, 14);
+
+    lora_sleep();
 }
 
 void uart_parse_byte(uint8_t ch)
@@ -275,3 +336,37 @@ void uart_receive(void *arg)
     }
 }
 
+// 封装带路由头的发送函数 (定点传输核心)
+void send_lora_packet(uint8_t target_id, const uint8_t* frame_buf, uint8_t frame_len) {
+    uint8_t tx_buf[134]; // 3字节路由头 + 最大131字节应用层帧
+    
+    // 构造 3字节路由头：目标组号 + 目标地址 + 信道
+    if (target_id == 0xFF) {
+        tx_buf[0] = 0xFF; tx_buf[1] = 0xFF; // 广播地址
+    } else {
+        tx_buf[0] = LORA_GROUP; tx_buf[1] = target_id; // 定点地址
+    }
+    tx_buf[2] = LORA_CHANNEL;
+    
+    memcpy(&tx_buf[3], frame_buf, frame_len);
+    
+    lora_wake(); // 发送前唤醒模块
+    uart_transmit(tx_buf, 3 + frame_len);
+    lora_sleep();
+}
+
+void heartbeat_task(void *arg) {
+    while(1) {
+        // 每隔 180~240 秒随机时间广播一次
+        uint32_t delay_s = 180 + (esp_random() % 60);
+        vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
+        
+        // 构建心跳帧 (target_id=0xFF, data="HB")
+        uint8_t frame_buf[131];
+        uint8_t frame_len = buildLoRaFrame(frame_buf, self_id, 0xFF, "HB");
+        
+        lora_wake(); // 【关键】发送前唤醒
+        send_lora_packet(0xFF, frame_buf, frame_len);
+        lora_sleep(); // 【关键】发送后立刻休眠
+    }
+}

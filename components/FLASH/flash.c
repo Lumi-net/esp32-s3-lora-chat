@@ -6,6 +6,7 @@
 #include "esp_flash.h"
 #include "esp_flash_spi_init.h"
 #include "uart.h"
+#include "va.h"
 
 #define FLASH_SIZE              (8 * 1024 * 1024UL)
 
@@ -33,7 +34,7 @@ static esp_flash_t *s_ext_flash = NULL;
 static uint32_t s_flash_size = 0;
 static meta_t g_meta;
 static uint32_t g_meta_offset = 0;
-static uint32_t g_write_offset;
+uint32_t g_write_offset;
 
 static inline uint32_t get_active_addr(void)
 {
@@ -47,6 +48,15 @@ static inline uint32_t get_inactive_addr(void)
     return (g_meta.active_block == 0)
         ? CHAT_BLOCK_B_ADDR
         : CHAT_BLOCK_A_ADDR;
+}
+
+// 将 LoRaFrameData 的时间打包为 MMDDHHMM 格式的整数
+static inline uint32_t pack_frame_time(const LoRaFrameData *frame)
+{
+    return (uint32_t)frame->month * 1000000 + 
+           (uint32_t)frame->day * 10000 + 
+           (uint32_t)frame->hour * 100 + 
+           (uint32_t)frame->minute;
 }
 
 static inline uint16_t chat_record_size(const LoRaFrameData *frame)
@@ -288,7 +298,7 @@ esp_err_t chat_storage_append(const LoRaFrameData *frame)
 
     size_t record_size = chat_record_size(frame);
 
-    if (record_size > CHAT_BLOCK_SIZE) { // 编译器说这个不可能成立
+    if (record_size > CHAT_BLOCK_SIZE) {
         return ESP_ERR_INVALID_SIZE;  // 虽然我也不知道怎么可能会出现这么大的数据，但是AI让我防一下
     }
 
@@ -582,5 +592,28 @@ esp_err_t chat_storage_read_prev(chat_cursor_t *cursor, LoRaFrameData *frame)
 
         // 其他错误（如数据损坏）
         return err;
+    }
+}
+
+void update_chat_list_last_time(void)
+{
+    chat_cursor_t cursor;
+    LoRaFrameData frame;
+    
+    // 初始化正向游标（从最旧到最新）
+    chat_read_forward_init(&cursor);
+    
+    // 遍历所有消息
+    while (chat_storage_read_next(&cursor, &frame) == ESP_OK) {
+        uint8_t id = frame.self_id;
+        if (id < 256 && chat_list[id].id != 0xFF) {
+            uint32_t current_time = pack_frame_time(&frame);
+            
+            // 因为是从旧到新遍历，所以直接覆盖即可，最后留下的就是最新的
+            // 如果 chat_list 是未初始化的，记得先判断或初始化 last_time 为 0
+            if (current_time > chat_list[id].last_time) {
+                chat_list[id].last_time = current_time;
+            }
+        }
     }
 }

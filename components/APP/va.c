@@ -1,10 +1,15 @@
 #include "va.h"
+// #include "types.h"
 
 
 QueueHandle_t appQueue = NULL;
 
-chat_item_t chat_list[255] =
-{
-    [0] = {.id = 0x00},
-    [1] = {.id = 0x01},
-}; // TODO: 从Flash获取聊天对象列表
+uint16_t auto_sleep_timeout = 300;
+
+int64_t last_activity_time_us = 0;
+
+chat_item_t chat_list[256] = {0};
+
+color_item_t color_index[COLOR_MAX] = {0};
+
+page_id_t current_page_id = PAGE_NONE;

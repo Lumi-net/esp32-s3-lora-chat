@@ -2,6 +2,13 @@
 #define __TYPES_H__ 
 
 #include <stdint.h>
+#include <time.h>
+
+typedef enum {
+    LORA_MODE_CONFIG = 0, // MD0=0, MD1=0 (配置模式)
+    LORA_MODE_WAKEUP = 1, // MD0=1, MD1=0 (唤醒/正常工作模式)
+    LORA_MODE_SLEEP  = 2  // MD0=1, MD1=1 (休眠/省电模式)
+} LoraMode;
 
 typedef enum
 {
@@ -37,6 +44,73 @@ typedef enum {
     PARSE_ERR_CRC     = 4,  // CRC校验失败
     PARSE_ERR_READ    = 5   // 读取不完整（LoRa超时丢字节）
 } ParseStatus;
+
+typedef enum
+{
+    EVENT_KEY,
+    EVENT_UART,
+    EVENT_WIFI
+} EventType;
+
+typedef enum {
+    WIFI_STATE_IDLE,
+    WIFI_STATE_AP_RUNNING,      // AP 已启动，等待网页配置
+    WIFI_STATE_CONNECTING_STA,  // 网页配置完成，正在连接 STA
+    WIFI_STATE_WAITING_SNTP,
+    WIFI_STATE_CONNECTED        // STA 连接成功
+} WifiProvisioningState;
+
+typedef struct
+{
+    EventType type;
+
+    union
+    {
+        uint8_t key;
+        LoRaFrameData frame;
+        WifiProvisioningState wifi_state;
+    };
+} UIEvent;
+
+typedef enum {
+    PAGE_NONE,
+    PAGE_MENU,
+    PAGE_SETTINGS,
+    PAGE_SETTINGS_DETAIL,
+    PAGE_CHAT,
+    PAGE_HOME
+} page_id_t;
+
+typedef enum {
+    COLOR_BACKGROUND = 0,
+    COLOR_MSG_TEXT,
+    COLOR_MSG_TIME,
+    COLOR_MSG_DATE,
+    COLOR_STATUS_BAR,
+    COLOR_TEXTAREA_BACKGROUND,
+    COLOR_MAX,
+} color_nvs_t;
+
+typedef struct
+{
+    color_nvs_t id;
+    uint32_t color;
+} color_item_t;
+
+typedef struct
+{
+    uint8_t id;
+    char alias[17];
+    uint32_t color;
+    uint32_t last_time;
+    time_t last_online;
+} chat_item_t;
+
+typedef struct
+{
+    uint8_t id;
+    char content[17];
+} settings_item_t;
 
 typedef struct __attribute__((packed))
 {
