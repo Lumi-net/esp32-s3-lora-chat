@@ -24,11 +24,10 @@
 #define META_MAGIC              0x5AA5
 #define CHAT_MAGIC              0xAA55
 
-// TODO: 修改GPIO引脚
-#define PIN_NUM_MISO 13
-#define PIN_NUM_MOSI 11
-#define PIN_NUM_CLK  12
-#define PIN_NUM_CS   10
+#define PIN_NUM_MISO 40
+#define PIN_NUM_MOSI 38
+#define PIN_NUM_CLK  39
+#define PIN_NUM_CS   41
 
 static esp_flash_t *s_ext_flash = NULL;
 static uint32_t s_flash_size = 0;
@@ -606,7 +605,7 @@ void update_chat_list_last_time(void)
     // 遍历所有消息
     while (chat_storage_read_next(&cursor, &frame) == ESP_OK) {
         uint8_t id = frame.self_id;
-        if (id < 256 && chat_list[id].id != 0xFF) {
+        if (chat_list[id].id != 0xFF) {
             uint32_t current_time = pack_frame_time(&frame);
             
             // 因为是从旧到新遍历，所以直接覆盖即可，最后留下的就是最新的

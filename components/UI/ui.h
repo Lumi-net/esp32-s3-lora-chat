@@ -11,6 +11,9 @@ extern lv_obj_t *g_chat_scroll_container; // 提升为全局，方便外部追�
 extern char g_chat_last_date[16];
 extern uint8_t g_chat_target_id;
 extern lv_obj_t *detail_title_label;
+extern lv_obj_t *soc_label;
+extern lv_obj_t *time_label;
+extern lv_obj_t *title_label;
 
 void ui_init(void);
 void lvgl_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map);

@@ -11,6 +11,7 @@ set(src_dirs
             WIFI
             FONTS
             SLEEP
+            I2C
             KEY)
 
 set(include_dirs
@@ -26,6 +27,7 @@ set(include_dirs
             WIFI
             FONTS
             SLEEP
+            I2C
             KEY)
 
 set(requires

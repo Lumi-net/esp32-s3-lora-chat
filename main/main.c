@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <sys/time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
@@ -13,11 +14,11 @@
 #include "SHIFT.h"
 #include "va.h"
 #include "key.h"
+#include "i2c.h"
 #include "flash.h"
 #include "sleep.h"
 #include "mynvs.h"
 #include "wifi.h"
-// TODO: 在状态栏加上当前状态和电量显示(INA219)
 #define INIT_DONE_BIT (1 << 0) // 定义初始化完成的事件位
 #define ACK_TIMEOUT_MS 3000 // ACK 超时时间为 3 秒
 
@@ -39,7 +40,11 @@ void app_main_task(void *arg)
     bool is_initialized = false;
     WifiProvisioningState current_wifi_state = WIFI_STATE_IDLE;
     int64_t quick_sleep_deadline_us = 0; 
-    bool just_woken_up_by_aux = false; 
+    bool just_woken_up_by_aux = false;
+    uint32_t last_battery_check_time = 0;
+    uint32_t last_time_check_time = 0;
+    uint8_t current_soc = 100;
+    uint32_t sntp_start_time = 0;
 
     while (1)
     {
@@ -148,7 +153,7 @@ void app_main_task(void *arg)
                             struct timeval tv;
                             gettimeofday(&tv, NULL);
                             struct tm *timeinfo = localtime(&tv.tv_sec);
-                            
+
                             uint8_t cur_month = 0, cur_day = 0, cur_hour = 0, cur_minute = 0;
                             if (timeinfo->tm_year >= (2024 - 1900)) {
                                 cur_month = timeinfo->tm_mon + 1;
@@ -290,60 +295,69 @@ void app_main_task(void *arg)
                     current_wifi_state = event.wifi_state;
                 } 
             }
-            if (current_wifi_state == WIFI_STATE_AP_RUNNING) {
-                // 非阻塞检查网页端是否已提交配置
-                if (wifi_check_ap_config_done()) {
-                    ESP_LOGI("APP", "Web config received, switching to STA...");
-                    
-                    // 更新 UI 提示
-                    if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "Config saved!\nConnecting to WiFi...");
-                    
-                    // 状态流转
-                    current_wifi_state = WIFI_STATE_CONNECTING_STA;
-                    
-                    // 停止 AP (会自动关闭 Web Server)
-                    wifi_ap_stop();
-                    vTaskDelay(pdMS_TO_TICKS(200)); // 短暂延时确保底层资源释放
-                }
-            }
-            else if (current_wifi_state == WIFI_STATE_CONNECTING_STA) {
-                if (check_wifi_saved()) {
-                    // 尝试连接 STA (这里会阻塞最多 15 秒，但因为是刚点击配置，用户有心理准备)
-                    if (wifi_time_connect(NULL, NULL)) {
-                        if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "WiFi Connected!\nSyncing time...");
+
+            if (true) {
+                if (current_wifi_state == WIFI_STATE_AP_RUNNING) {
+                    // 非阻塞检查网页端是否已提交配置
+                    if (wifi_check_ap_config_done()) {
+                        ESP_LOGI("APP", "Web config received, switching to STA...");
                         
-                        // 【关键流转】进入 SNTP 等待状态，并异步启动 SNTP
-                        current_wifi_state = WIFI_STATE_WAITING_SNTP;
-                        wifi_sntp_start(); 
+                        // 更新 UI 提示
+                        if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "Config saved!\nConnecting to WiFi...");
+                        
+                        // 状态流转
+                        current_wifi_state = WIFI_STATE_CONNECTING_STA;
+                        
+                        // 停止 AP (会自动关闭 Web Server)
+                        wifi_ap_stop();
+                        vTaskDelay(pdMS_TO_TICKS(200)); // 短暂延时确保底层资源释放
+                    }
+                }
+                else if (current_wifi_state == WIFI_STATE_CONNECTING_STA) {
+                    if (check_wifi_saved()) {
+                        // 尝试连接 STA (这里会阻塞最多 15 秒，但因为是刚点击配置，用户有心理准备)
+                        if (wifi_time_connect(NULL, NULL)) {
+                            if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "WiFi Connected!\nSyncing time...");
+                            
+                            // 【关键流转】进入 SNTP 等待状态，并异步启动 SNTP
+                            current_wifi_state = WIFI_STATE_WAITING_SNTP;
+                            sntp_start_time = xTaskGetTickCount();
+                            wifi_sntp_start(); 
+                        } else {
+                            if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "Connect Failed!\nCheck password.");
+                            wifi_time_close();
+                            current_wifi_state = WIFI_STATE_IDLE;
+                        }
                     } else {
-                        if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "Connect Failed!\nCheck password.");
-                        wifi_time_close();
+                        if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "No saved WiFi configuration found.\nPlease configure WiFi first.");
                         current_wifi_state = WIFI_STATE_IDLE;
                     }
-                } else {
-                    if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "No saved WiFi configuration found.\nPlease configure WiFi first.");
-                    current_wifi_state = WIFI_STATE_IDLE;
                 }
-            }
-            else if (current_wifi_state == WIFI_STATE_WAITING_SNTP) {
-                // 【非阻塞轮询】检查 SNTP 回调是否已触发
-                if (wifi_sntp_is_synced()) {
-                    if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "Time Synced!\nClosing WiFi...");
-                    
-                    // 同步成功，立即关闭 WiFi 射频省电！
-                    wifi_time_close(); 
-                    
-                    if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "Complete!");
-                    current_wifi_state = WIFI_STATE_CONNECTED;
-                    
-                    // 1.5秒后自动返回设置主页
-                    static uint32_t complete_time = 0;
-                    if (complete_time == 0) complete_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
-                    
-                    if ((xTaskGetTickCount() * portTICK_PERIOD_MS) - complete_time >= 1500) {
-                        complete_time = 0;
+                else if (current_wifi_state == WIFI_STATE_WAITING_SNTP) {
+                    // 【非阻塞轮询】检查 SNTP 回调是否已触发
+                    if (wifi_sntp_is_synced()) {
+                        if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "Time Synced!\nClosing WiFi...");
+                        
+                        // 同步成功，立即关闭 WiFi 射频省电！
+                        wifi_time_close(); 
+                        
+                        if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "Complete!");
+                        current_wifi_state = WIFI_STATE_CONNECTED;
+                        
+                        // 1.5秒后自动返回设置主页
+                        static uint32_t complete_time = 0;
+                        if (complete_time == 0) complete_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                        
+                        if ((xTaskGetTickCount() * portTICK_PERIOD_MS) - complete_time >= 1500) {
+                            complete_time = 0;
+                            current_wifi_state = WIFI_STATE_IDLE;
+                            ui_show_settings_page(); 
+                        }
+                    }
+                    else if ((xTaskGetTickCount() - sntp_start_time) > pdMS_TO_TICKS(15000)) {
+                        lv_label_set_text(detail_title_label, "Time Sync Failed!");
+                        wifi_time_close();
                         current_wifi_state = WIFI_STATE_IDLE;
-                        ui_show_settings_page(); 
                     }
                 }
             }
@@ -378,7 +392,56 @@ void app_main_task(void *arg)
                     }
                 }
             }
-            
+
+            { // 电量检测
+                uint32_t current_tick = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                if (current_tick - last_battery_check_time >= 30000) { 
+                    last_battery_check_time = current_tick;
+                    
+                    // 确保 LoRa 和 WiFi 没在发射 (防止大电流拉低电压导致电量显示暴跌)
+                    if (send_state == SEND_STATE_IDLE && current_wifi_state == WIFI_STATE_IDLE) {
+                        float voltage = 0, current = 0;
+                        
+                        // 调用封装好的函数：上电 -> 读取 -> 断电 (全程约 30ms)
+                        ina219_get_data_once(&voltage, &current);
+                        
+                        if (voltage > 2.5f && voltage < 4.3f) {
+                            uint8_t new_soc = battery_voltage_to_percent(voltage);
+                            
+                            // 防抖动：电量变化超过 1% 才更新 UI
+                            if (abs((int)new_soc - (int)current_soc) >= 1) {
+                                current_soc = new_soc;
+                                char soc_text[5];
+                                snprintf(soc_text, sizeof(soc_text), "%u%%", new_soc);
+                                lv_label_set_text(soc_label, soc_text);
+                                ESP_LOGI("BATTERY", "V: %.2fV, I: %.2fA, SoC: %d%%", voltage, current, current_soc);
+                            }
+                        }
+                    }
+                }
+            }
+
+            {
+                uint32_t current_tick = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                if (current_tick - last_time_check_time >= 2000) {
+                    last_time_check_time = current_tick;
+                    struct timeval tv;
+                    gettimeofday(&tv, NULL);
+                    struct tm *timeinfo = localtime(&tv.tv_sec);
+                    if (timeinfo->tm_year >= 124) {
+                        lv_label_set_text(time_label, "Set Time First!");
+                        // 隐藏对象（参数1: 对象的指针）
+                        lv_obj_add_flag(title_label, LV_OBJ_FLAG_HIDDEN);
+                    } else {
+                        if (lv_obj_has_flag(title_label, LV_OBJ_FLAG_HIDDEN)) {
+                            lv_obj_remove_flag(title_label, LV_OBJ_FLAG_HIDDEN);
+                        }
+                        char time_text[12];
+                        strftime(time_text, sizeof(time_text), "%m/%d %H:%M", timeinfo);
+                        lv_label_set_text(time_label, time_text);
+                    }
+                }
+            }
         }
         lv_timer_handler();
         vTaskDelay(pdMS_TO_TICKS(5));
@@ -393,10 +456,12 @@ void peripheral_init_task(void *arg)
     uart_init();
     lv_label_set_text(boot_text_label, "Initializing Flash...");
     ext_flash_init();
+    lv_label_set_text(boot_text_label, "Initializing I2C...");
+    i2c_master_init();
     lv_label_set_text(boot_text_label, "Initializing NVS...");
     nvs_init();
     lv_label_set_text(boot_text_label, "Reading NVS...");
-    nvs_read_all_alias_to_list();
+    nvs_read_all_alias_to_list(); // 先读alias让chat_list里面的id被填上
     nvs_read_all_user_color_to_list();
     nvs_read_all_interface_color_to_list();
     lv_label_set_text(boot_text_label, "Restoring Flash Offset...");

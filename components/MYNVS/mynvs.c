@@ -22,12 +22,6 @@ esp_err_t nvs_init(void) {
 }
 
 esp_err_t nvs_set_alias(uint8_t id, const char *alias) {
-    // 边界检查
-    if (id >= (sizeof(chat_list) / sizeof(chat_list[0]))) {
-        ESP_LOGE(TAG, "ID %d out of bounds!", id);
-        return ESP_ERR_INVALID_ARG;
-    }
-
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
@@ -39,7 +33,7 @@ esp_err_t nvs_set_alias(uint8_t id, const char *alias) {
     snprintf(key, sizeof(key), "%s%u", ALIAS_KEY_PREFIX, id); // 生成 key (如 "a_5")
 
     
-    if (alias == NULL || strlen(alias) == 0) { // 为空或者没长度视为删除(事实上这里不应该能删除 因为加联系人的时候就必须设置一个别名 删除了就没名字了)
+    if (alias == NULL || strlen(alias) == 0) { // 为空或者没长度视为删除联系人
         err = nvs_erase_key(handle, key);
         if (err == ESP_ERR_NVS_NOT_FOUND) {
             err = ESP_OK; // 本来就没有也算成功
@@ -86,10 +80,6 @@ esp_err_t nvs_set_alias(uint8_t id, const char *alias) {
 }
 
 esp_err_t nvs_set_user_color(uint8_t id, uint32_t color) { // 不可以删除 如果不想要了就随机生成一个 和开始一样
-    if (id >= (sizeof(chat_list) / sizeof(chat_list[0]))) {
-        ESP_LOGE(TAG, "ID %d out of bounds!", id);
-        return ESP_ERR_INVALID_ARG;
-    }
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
@@ -223,27 +213,22 @@ void nvs_read_all_alias_to_list(void) {
         // 从 key 中解析出 ID
         uint8_t id = 0;
         if (sscanf(info.key, "a_%hhu", &id) == 1) { // 从Key里面提取出id
+            char nick[17] = {0}; // 大小与 alias[17] 保持一致
+            size_t len = sizeof(nick);
             
-            if (id < 256) {
-                char nick[17] = {0}; // 大小与 alias[17] 保持一致
-                size_t len = sizeof(nick);
+            if (nvs_get_str(handle, info.key, nick, &len) == ESP_OK) {
+                // 1. 存入 ID
+                chat_list[id].id = id;
                 
-                if (nvs_get_str(handle, info.key, nick, &len) == ESP_OK) {
-                    // 1. 存入 ID
-                    chat_list[id].id = id;
-                    
-                    // 2. 安全拷贝字符串，防止溢出，并确保以 '\0' 结尾
-                    strncpy(chat_list[id].alias, nick, sizeof(chat_list[id].alias) - 1);
-                    chat_list[id].alias[sizeof(chat_list[id].alias) - 1] = '\0';
-                    
-                    ESP_LOGI(TAG, "Read ID: 0x%02X (%3d), Alias: [%s]", 
-                             id, id, chat_list[id].alias);
-                    count++;
-                } else {
-                    ESP_LOGW(TAG, "Failed to get string for key: %s", info.key);
-                }
+                // 2. 安全拷贝字符串，防止溢出，并确保以 '\0' 结尾
+                strncpy(chat_list[id].alias, nick, sizeof(chat_list[id].alias) - 1);
+                chat_list[id].alias[sizeof(chat_list[id].alias) - 1] = '\0';
+                
+                ESP_LOGI(TAG, "Read ID: 0x%02X (%3d), Alias: [%s]", 
+                            id, id, chat_list[id].alias);
+                count++;
             } else {
-                ESP_LOGW(TAG, "ID %d out of bounds! (chat_list size is 256, max index 255)", id);
+                ESP_LOGW(TAG, "Failed to get string for key: %s", info.key);
             }
         }
         
@@ -282,27 +267,22 @@ void nvs_read_all_user_color_to_list(void) {
         
         uint8_t id = 0;
         // 匹配前缀为 "uc_" 的键，例如 "uc_5"。%hhu 对应 uint8_t
-        if (sscanf(info.key, "uc_%hhu", &id) == 1) { 
-            
-            if (id < 256) {
-                uint32_t color = 0;
+        if (sscanf(info.key, "uc_%hhu", &id) == 1) {
+            uint32_t color = 0;
                 
-                if (nvs_get_u32(handle, info.key, &color) == ESP_OK) {
-                    chat_list[id].color = color;
-                    
-                    // 防御性编程：如果由于某种原因 alias 还没读，确保该槽位被标记为有效
-                    if (chat_list[id].id == 0xFF) {
-                        chat_list[id].id = id; 
-                    }
-
-                    ESP_LOGI(TAG, "Read ID: 0x%02X (%3d), Color: 0x%06X", 
-                             id, id, color);
-                    count++;
-                } else {
-                    ESP_LOGW(TAG, "Failed to get u32 for key: %s", info.key);
+            if (nvs_get_u32(handle, info.key, &color) == ESP_OK) {
+                chat_list[id].color = color;
+                
+                // 防御性编程：如果由于某种原因 alias 还没读，确保该槽位被标记为有效
+                if (chat_list[id].id == 0xFF) {
+                    chat_list[id].id = id; 
                 }
+
+                ESP_LOGI(TAG, "Read ID: 0x%02X (%3d), Color: 0x%06X", 
+                            id, id, color);
+                count++;
             } else {
-                ESP_LOGW(TAG, "ID %d out of bounds! (chat_list size is 256)", id);
+                ESP_LOGW(TAG, "Failed to get u32 for key: %s", info.key);
             }
         }
         

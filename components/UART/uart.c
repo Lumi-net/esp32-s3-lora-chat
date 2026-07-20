@@ -1,13 +1,15 @@
 #include "uart.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
+#include "esp_log.h"
 #include "esp_random.h"
 #include <string.h>
+#include <sys/time.h>
 #include "va.h"
 #include "types.h"
 
-#define LORA_MD0 GPIO_NUM_4
-#define LORA_MD1 GPIO_NUM_5
+#define LORA_MD0 GPIO_NUM_47
+#define LORA_MD1 GPIO_NUM_48
 #define LORA_CHANNEL 0x3C    // 470 MHz
 #define LORA_GROUP   0x00    // Lumi-net组号
 

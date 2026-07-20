@@ -24,8 +24,6 @@ static EventGroupHandle_t wifi_event_group = NULL;
 static bool wifi_initialized = false;
 static bool wifi_started = false;
 static httpd_handle_t web_server = NULL; // 用于管理Web服务器生命周期
-// 全局或静态变量，用于跨任务通信
-static TaskHandle_t ui_update_task_handle = NULL;
 
 static const char html_page[] =
     "<!DOCTYPE html>"
