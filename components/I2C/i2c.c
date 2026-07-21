@@ -8,9 +8,9 @@
 #include "esp_log.h"
 #include "math.h"
 
-#define INA219_PWR_PIN      GPIO_NUM_10  // 给 INA219 供电的 GPIO
-#define I2C_MASTER_SDA_IO   GPIO_NUM_8
-#define I2C_MASTER_SCL_IO   GPIO_NUM_9
+#define INA219_PWR_PIN      GPIO_NUM_35  // 给 INA219 供电的 GPIO
+#define I2C_MASTER_SDA_IO   GPIO_NUM_36
+#define I2C_MASTER_SCL_IO   GPIO_NUM_37
 #define I2C_MASTER_NUM      I2C_NUM_0
 
 // INA219 I2C地址 (A0和A1都接地时为0x40)
