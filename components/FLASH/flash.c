@@ -283,6 +283,8 @@ uint32_t chat_storage_scan(void)
             break;
 
         offset += record_size;
+
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     return offset;
@@ -614,5 +616,6 @@ void update_chat_list_last_time(void)
                 chat_list[id].last_time = current_time;
             }
         }
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }

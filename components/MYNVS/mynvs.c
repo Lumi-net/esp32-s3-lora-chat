@@ -4,10 +4,11 @@
 #include "esp_log.h"
 #include "va.h"
 #include "pwm.h"
+#include "mynvs.h"
 
 static const char *TAG = "NVS";
 
-#define NVS_NAMESPACE      "alias"      // NVS 命名空间
+#define NVS_NAMESPACE      "lumi"      // NVS 命名空间
 #define ALIAS_KEY_PREFIX   "a_"         // Key 的前缀
 #define MAX_ALIAS_LEN      16           // 昵称最大字符数（不含 \0）
 
@@ -18,6 +19,9 @@ esp_err_t nvs_init(void) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
+    nvs_handle_t handle;
+    nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    nvs_close(handle);
     return ret;
 }
 
@@ -195,7 +199,7 @@ void nvs_read_all_alias_to_list(void) {
     }
     nvs_handle_t handle;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open NVS for iteration");
+        ESP_LOGE(TAG, "Failed to open NVS for alias iteration");
         return;
     }
 
@@ -233,9 +237,10 @@ void nvs_read_all_alias_to_list(void) {
         }
         
         nvs_entry_next(&it); // 移动到下一个
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
     
-    ESP_LOGI(TAG, "--- Total found: %d items ---", count);
+    ESP_LOGI(TAG, "--- Total alias found: %d items ---", count);
     
     nvs_release_iterator(it); // 释放迭代器
     nvs_close(handle);
@@ -287,6 +292,7 @@ void nvs_read_all_user_color_to_list(void) {
         }
         
         nvs_entry_next(&it); // 移动到下一个
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
     
     ESP_LOGI(TAG, "--- Total custom colors found: %d items ---", count);
@@ -346,6 +352,7 @@ void nvs_read_all_interface_color_to_list(void) {
         }
         
         nvs_entry_next(&it); // 移动到下一个
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
     
     ESP_LOGI(TAG, "--- Total custom interface colors found: %d items ---", count);
@@ -364,23 +371,17 @@ void nvs_read_sleep_time(void) {
     nvs_iterator_t it = NULL;
     nvs_entry_find("nvs", NVS_NAMESPACE, NVS_TYPE_U16, &it);
 
-    while (it != NULL) {
-        nvs_entry_info_t info;
-        nvs_entry_info(it, &info);
-        uint16_t time = 300;
-        if (strcmp(info.key, "st") == 0) {
-            if (nvs_get_u16(handle, info.key, &time) == ESP_OK) {
-                auto_sleep_timeout = time;
-                ESP_LOGI(TAG, "Read Sleep Time: %u", time);
-            } else {
-                ESP_LOGW(TAG, "Failed to get u16 for key: %s", info.key);
-            }
-        }
-        
-        nvs_entry_next(&it); // 移动到下一个
+    uint16_t time = 300;
+    esp_err_t err = nvs_get_u16(handle, "st", &time);
+    if (err == ESP_OK) {
+        auto_sleep_timeout = time;
+        ESP_LOGI(TAG, "Read Sleep Time: %u", time);
+    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "Key 'st' not found in NVS, using default: %u", auto_sleep_timeout);
+    } else {
+        ESP_LOGW(TAG, "Failed to get u16 for key: %s", "st");
     }
     
-    nvs_release_iterator(it); // 释放迭代器
     nvs_close(handle);
 }
 

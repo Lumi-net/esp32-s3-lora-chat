@@ -135,7 +135,7 @@ void lvgl_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map
 {
     uint16_t x1 = area->x1, x2 = area->x2;
     uint16_t y1 = area->y1, y2 = area->y2;
-
+        
     // esp_lcd 自动处理 PSRAM 的 Cache 同步，直接传入 px_map 即可
     esp_lcd_panel_draw_bitmap(panel_handle, x1, y1, x2 + 1, y2 + 1, px_map);
     
@@ -143,16 +143,7 @@ void lvgl_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map
     lv_display_flush_ready(disp);
 }
 
-// LVGL Tick 任务（1ms 中断或 RTOS 任务）
-void lvgl_tick_task(void *arg)
-{
-    TickType_t last = xTaskGetTickCount();
 
-    while (1) {
-        lv_tick_inc(1);
-        vTaskDelayUntil(&last, pdMS_TO_TICKS(1));
-    }
-}
 
 void ui_init(void) { 
     lv_init();
@@ -167,10 +158,12 @@ void ui_init(void) {
 }
 
 void create_ui(void) {
-    lv_obj_t *scr = lv_scr_act();
+    lv_obj_t *scr = lv_screen_active();
 
-    lv_coord_t screenWidth = lv_disp_get_hor_res(NULL);
-    lv_coord_t screenHeight = lv_disp_get_ver_res(NULL);
+    lv_obj_clean(scr); 
+
+    lv_coord_t screenWidth = lv_display_get_horizontal_resolution(NULL);
+    lv_coord_t screenHeight = lv_display_get_vertical_resolution(NULL);
 
     lv_obj_set_style_bg_color(
         scr,
@@ -194,7 +187,7 @@ void create_ui(void) {
     lv_obj_set_size(status_bar, screenWidth, 15); 
     lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_scrollbar_mode(status_bar, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_clear_flag(status_bar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(status_bar, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(status_bar, lv_color_hex(color_index[COLOR_STATUS_BAR].color), LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(status_bar, LV_OPA_COVER, LV_STATE_DEFAULT);
     lv_obj_set_style_radius(status_bar, 0, LV_STATE_DEFAULT);
@@ -249,8 +242,9 @@ void create_ui(void) {
     lv_obj_set_style_border_width(input_area, 0, LV_STATE_DEFAULT);
     lv_obj_set_style_pad_all(input_area, 6, 0);
     lv_obj_set_height(input_area, LV_SIZE_CONTENT);
+    lv_obj_set_style_min_height(input_area, 48, LV_STATE_DEFAULT);
     lv_obj_set_flex_flow(input_area, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(input_area, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(input_area, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
 
     lv_obj_t *input_left_panel = lv_obj_create(input_area); // 左输入面板
     lv_obj_remove_style_all(input_left_panel);
@@ -260,7 +254,7 @@ void create_ui(void) {
     lv_obj_set_flex_align(input_left_panel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(input_left_panel, 0, LV_STATE_DEFAULT);
     lv_obj_set_width(input_left_panel, 28);
-    lv_obj_set_height(input_left_panel, LV_SIZE_CONTENT);
+    lv_obj_set_height(input_left_panel, 36);
 
     lv_obj_t *input_icon_container = lv_obj_create(input_left_panel); // SHIFT和候选&LOCK
     lv_obj_remove_style_all(input_icon_container);
@@ -279,7 +273,6 @@ void create_ui(void) {
     lv_obj_set_width(input_cnt_left, LV_PCT(100));
     lv_obj_set_style_text_align(input_cnt_left, LV_TEXT_ALIGN_RIGHT, LV_STATE_DEFAULT);
     lv_obj_set_height(input_cnt_left, 10); 
-    lv_obj_set_height(input_cnt_left, LV_SIZE_CONTENT);
 
     lv_obj_t *shift_icon = lv_image_create(input_icon_container); // SHIFT
     lv_image_set_src(shift_icon, &SHIFT);
@@ -307,6 +300,7 @@ void create_ui(void) {
     lv_obj_set_style_pad_right(g_ta, 8, LV_STATE_DEFAULT);
     lv_obj_set_height(g_ta, LV_SIZE_CONTENT);
     lv_obj_set_style_min_height(g_ta, 40, LV_STATE_DEFAULT);
+    lv_obj_set_style_max_height(g_ta, 100, LV_STATE_DEFAULT);
     lv_obj_set_flex_grow(g_ta, 1);
     lv_obj_set_style_text_align(g_ta, LV_TEXT_ALIGN_LEFT, LV_STATE_DEFAULT);
     lv_obj_add_state(g_ta, LV_STATE_FOCUSED);
@@ -317,7 +311,7 @@ static void deferred_show_settings_page(lv_timer_t * timer) {
     ui_show_settings_page();
     
     // 销毁这个单次定时器，防止内存泄漏
-    lv_timer_del(timer);
+    lv_timer_delete(timer);
 }
 
 // 定时器回调：直接操作全局变量
@@ -438,7 +432,7 @@ static void append_message_ui(lv_obj_t *container, LoRaFrameData *frame, char *l
     
 
     // 设置文本样式
-    lv_label_set_long_mode(text_label, LV_LABEL_LONG_WRAP); // 自动换行
+    lv_label_set_long_mode(text_label, LV_LABEL_LONG_MODE_WRAP); // 自动换行
     lv_obj_set_flex_grow(text_label, 1); // 占据剩余宽度
     lv_obj_set_style_text_font(text_label, &jbm12, 0);
     lv_obj_set_style_pad_bottom(text_label, 8, 0);

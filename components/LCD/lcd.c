@@ -6,8 +6,8 @@ esp_lcd_panel_handle_t panel_handle = NULL;
 void lcd_init(void)
     {
     esp_lcd_panel_io_spi_config_t io_config = {
-        .dc_gpio_num = GPIO_NUM_11,
-        .cs_gpio_num = GPIO_NUM_16,
+        .dc_gpio_num = GPIO_NUM_13,
+        .cs_gpio_num = GPIO_NUM_10,
         .pclk_hz = 60000000,
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
@@ -19,7 +19,7 @@ void lcd_init(void)
 
 
     esp_lcd_panel_dev_config_t panel_config = {
-        .reset_gpio_num = GPIO_NUM_12,
+        .reset_gpio_num = GPIO_NUM_14,
         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
         .bits_per_pixel = 16,
     };

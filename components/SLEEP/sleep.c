@@ -4,13 +4,14 @@
 #include "esp_timer.h"
 #include "esp_sleep.h"
 #include "driver/gpio.h"
+#include "esp_pm.h"
 #include "driver/rtc_io.h" // 新增：用于 rtc_gpio 系列函数配置 EXT0/EXT1
 #include "va.h"           // 假设 last_activity_time_us, auto_sleep_timeout, appQueue 在这里声明
 #include "pwm.h"          // 用于 duty_set()
 
 static const char *TAG = "SLEEP";
 
-#define WAKEUP_AUX_GPIO_PIN  GPIO_NUM_9
+#define WAKEUP_AUX_GPIO_PIN  GPIO_NUM_21
 // 键盘列引脚掩码，用于 EXT1 唤醒
 #define KEYPAD_COL_MASK  ((1ULL << GPIO_NUM_16) | (1ULL << GPIO_NUM_17) | \
                           (1ULL << GPIO_NUM_18) | (1ULL << GPIO_NUM_8))
@@ -22,7 +23,8 @@ bool check_and_enter_sleep(void)
 {
     int64_t current_time_us = esp_timer_get_time();
     int64_t elapsed_time_us = current_time_us - last_activity_time_us;
-    if (elapsed_time_us >= auto_sleep_timeout) {
+    int64_t timeout_us = (int64_t)auto_sleep_timeout * 1000000LL;
+    if (elapsed_time_us >= timeout_us) {
         ESP_LOGI(TAG, "Timeout reached (%.2f seconds), preparing for light sleep",
                  (float)elapsed_time_us / 1000000.0);
         return true;
@@ -72,6 +74,21 @@ static void configure_wakeup_sources(void)
     esp_sleep_enable_ext1_wakeup_io(KEYPAD_COL_MASK, ESP_EXT1_WAKEUP_ANY_LOW);
 }
 
+static bool check_wakeup_pins_idle(void) {
+    // 检查 AUX (低电平触发，所以高电平才是空闲)
+    if (gpio_get_level(WAKEUP_AUX_GPIO_PIN) == 0) {
+        ESP_LOGW(TAG, "Reject: AUX pin is LOW!");
+        return false;
+    }
+    // 检查键盘列 (任意低电平触发)
+    if (gpio_get_level(GPIO_NUM_16) == 0 || gpio_get_level(GPIO_NUM_17) == 0 ||
+        gpio_get_level(GPIO_NUM_18) == 0 || gpio_get_level(GPIO_NUM_8) == 0) {
+        ESP_LOGW(TAG, "Reject: Keypad col pin is LOW!");
+        return false;
+    }
+    return true;
+}
+
 /**
  * @brief 进入 Light-sleep 并处理唤醒后的逻辑
  * @return 1 如果是键盘唤醒, 2 如果是 AUX 唤醒, 0 如果是其他/未知唤醒
@@ -87,10 +104,34 @@ int enter_light_sleep(void)
     // 2. 配置唤醒源
     configure_wakeup_sources();
 
+    if (!check_wakeup_pins_idle()) {
+        // 恢复背光并返回，不进入睡眠
+        duty_set(scr_brightness); 
+        return 0; 
+    }
+
     // 3. 进入 Light-sleep (此函数会阻塞，直到被唤醒)
     esp_err_t ret = esp_light_sleep_start();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to enter light sleep: %s", esp_err_to_name(ret));
+        
+        // 【终极调试代码开始】
+        ESP_LOGE(TAG, "========== DUMPING SLEEP REJECT REASON ==========");
+        
+        // 1. 打印是谁持有了电源锁 (如果是 wifi:1 或 uart:1，就是它们阻止了睡眠)
+        ESP_LOGE(TAG, "--- Power Locks ---");
+        esp_pm_dump_locks(stdout); 
+        
+        // 2. 打印唤醒引脚的实时电平
+        ESP_LOGE(TAG, "--- Pin Levels (0=LOW, 1=HIGH) ---");
+        ESP_LOGE(TAG, "AUX(GPIO9): %d", gpio_get_level(WAKEUP_AUX_GPIO_PIN));
+        ESP_LOGE(TAG, "Col(16): %d, Col(17): %d, Col(18): %d, Col(8): %d", 
+                gpio_get_level(GPIO_NUM_16), gpio_get_level(GPIO_NUM_17), 
+                gpio_get_level(GPIO_NUM_18), gpio_get_level(GPIO_NUM_8));
+                
+        ESP_LOGE(TAG, "===================================================");
+        // 【终极调试代码结束】
+        
         return 0;
     }
 

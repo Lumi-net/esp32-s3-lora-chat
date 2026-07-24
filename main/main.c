@@ -33,6 +33,18 @@ static uint8_t pending_target_id = 0;   // 缓存目标ID，用于收到ACK后�
 static uint32_t send_start_time = 0;    // 记录发送开始的时间戳
 static char pending_payload[121] = {0}; // 缓存发送的内容
 
+static void update_boot_label_cb(void *arg) {
+    char *text = (char *)arg;
+    if (boot_text_label != NULL && text != NULL) {
+        lv_label_set_text(boot_text_label, text);
+    }
+}
+
+static void lvgl_tick_cb(void *arg)
+{
+    lv_tick_inc(1);
+}
+
 void app_main_task(void *arg)
 {
     UIEvent event;
@@ -52,20 +64,23 @@ void app_main_task(void *arg)
         if (!is_initialized) {
             EventBits_t bits = xEventGroupGetBits(init_event_group);
             if (bits & INIT_DONE_BIT) {
+                ESP_LOGI("APP", "IC!1");
                 is_initialized = true;
+                last_activity_time_us = esp_timer_get_time();
                 lv_label_set_text(boot_text_label, "Done!");
+                ESP_LOGI("APP", "IC!2");
 
                 create_ui();
-                
+                ESP_LOGI("APP", "IC!3");
                 // 切换到菜单页面
                 ui_show_menu_page();
-                
-                // 释放开机动画界面的内存，防止内存泄漏
-                if (scr_loading != NULL) {
-                    lv_obj_del(scr_loading);
-                    scr_loading = NULL;
-                }
+                ESP_LOGI("APP", "IC!4");
 
+                // 释放开机动画界面的内存，防止内存泄漏
+                scr_loading = NULL;
+                boot_text_label = NULL;
+
+                ESP_LOGI("APP", "IC!5");
                 xTaskCreatePinnedToCore(scanKeyTask, "scan_key", 2048, NULL, 5, NULL, 0);
                 xTaskCreatePinnedToCore(uart_receive, "uart_receive", 4096, NULL, 5, NULL, 0);
             }
@@ -365,9 +380,9 @@ void app_main_task(void *arg)
             { // 睡觉检查
                 // 安全检查：只有在非关键业务状态下才允许进入睡眠
                 // 1. 没有正在等待 LoRa 的 ACK
-                // 2. WiFi 处于空闲或已连接状态（不在配网/连接过程中）
+                // 2. WiFi 处于空闲状态
                 bool is_system_idle = (send_state == SEND_STATE_IDLE) && 
-                                    (current_wifi_state == WIFI_STATE_IDLE || current_wifi_state == WIFI_STATE_CONNECTED);
+                                    (current_wifi_state == WIFI_STATE_IDLE);
 
                 bool should_sleep = false;
                 
@@ -393,33 +408,33 @@ void app_main_task(void *arg)
                 }
             }
 
-            { // 电量检测
-                uint32_t current_tick = xTaskGetTickCount() * portTICK_PERIOD_MS;
-                if (current_tick - last_battery_check_time >= 30000) { 
-                    last_battery_check_time = current_tick;
+            // { // 电量检测
+            //     uint32_t current_tick = xTaskGetTickCount() * portTICK_PERIOD_MS;
+            //     if (current_tick - last_battery_check_time >= 30000) { 
+            //         last_battery_check_time = current_tick;
                     
-                    // 确保 LoRa 和 WiFi 没在发射 (防止大电流拉低电压导致电量显示暴跌)
-                    if (send_state == SEND_STATE_IDLE && current_wifi_state == WIFI_STATE_IDLE) {
-                        float voltage = 0, current = 0;
+            //         // 确保 LoRa 和 WiFi 没在发射 (防止大电流拉低电压导致电量显示暴跌)
+            //         if (send_state == SEND_STATE_IDLE && current_wifi_state == WIFI_STATE_IDLE) {
+            //             float voltage = 0, current = 0;
                         
-                        // 调用封装好的函数：上电 -> 读取 -> 断电 (全程约 30ms)
-                        ina219_get_data_once(&voltage, &current);
+            //             // 调用封装好的函数：上电 -> 读取 -> 断电 (全程约 30ms)
+            //             ina219_get_data_once(&voltage, &current);
                         
-                        if (voltage > 2.5f && voltage < 4.3f) {
-                            uint8_t new_soc = battery_voltage_to_percent(voltage);
+            //             if (voltage > 2.5f && voltage < 4.3f) {
+            //                 uint8_t new_soc = battery_voltage_to_percent(voltage);
                             
-                            // 防抖动：电量变化超过 1% 才更新 UI
-                            if (abs((int)new_soc - (int)current_soc) >= 1) {
-                                current_soc = new_soc;
-                                char soc_text[5];
-                                snprintf(soc_text, sizeof(soc_text), "%u%%", new_soc);
-                                lv_label_set_text(soc_label, soc_text);
-                                ESP_LOGI("BATTERY", "V: %.2fV, I: %.2fA, SoC: %d%%", voltage, current, current_soc);
-                            }
-                        }
-                    }
-                }
-            }
+            //                 // 防抖动：电量变化超过 1% 才更新 UI
+            //                 if (abs((int)new_soc - (int)current_soc) >= 1) {
+            //                     current_soc = new_soc;
+            //                     char soc_text[5];
+            //                     snprintf(soc_text, sizeof(soc_text), "%u%%", new_soc);
+            //                     lv_label_set_text(soc_label, soc_text);
+            //                     ESP_LOGI("BATTERY", "V: %.2fV, I: %.2fA, SoC: %d%%", voltage, current, current_soc);
+            //                 }
+            //             }
+            //         }
+            //     }
+            // }
 
             {
                 uint32_t current_tick = xTaskGetTickCount() * portTICK_PERIOD_MS;
@@ -428,7 +443,7 @@ void app_main_task(void *arg)
                     struct timeval tv;
                     gettimeofday(&tv, NULL);
                     struct tm *timeinfo = localtime(&tv.tv_sec);
-                    if (timeinfo->tm_year >= 124) {
+                    if (timeinfo->tm_year < 124) {
                         lv_label_set_text(time_label, "Set Time First!");
                         // 隐藏对象（参数1: 对象的指针）
                         lv_obj_add_flag(title_label, LV_OBJ_FLAG_HIDDEN);
@@ -440,6 +455,7 @@ void app_main_task(void *arg)
                         strftime(time_text, sizeof(time_text), "%m/%d %H:%M", timeinfo);
                         lv_label_set_text(time_label, time_text);
                     }
+                    ESP_LOGI("TIME", "CT: %u", current_tick);
                 }
             }
         }
@@ -450,25 +466,47 @@ void app_main_task(void *arg)
 
 void peripheral_init_task(void *arg)
 {
-    lv_label_set_text(boot_text_label, "Initializing Keyboard...");
+    lv_async_call(update_boot_label_cb, "Initializing Keyboard...");
     key_init();
-    lv_label_set_text(boot_text_label, "Initializing UART...");
+    ESP_LOGI("KEY", "Initialized Keyboard...");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    lv_async_call(update_boot_label_cb, "Initializing UART...");
     uart_init();
-    lv_label_set_text(boot_text_label, "Initializing Flash...");
+    ESP_LOGI("UART", "Initialized UART...");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    lv_async_call(update_boot_label_cb, "Initializing Flash...");
     ext_flash_init();
-    lv_label_set_text(boot_text_label, "Initializing I2C...");
-    i2c_master_init();
-    lv_label_set_text(boot_text_label, "Initializing NVS...");
+    ESP_LOGI("FLASH", "Initialized Flash...");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    // lv_async_call(update_boot_label_cb, "Initializing I2C...");
+    // i2c_master_init();
+    // ESP_LOGI("I2C", "Initialized I2C...");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    lv_async_call(update_boot_label_cb, "Initializing NVS...");
     nvs_init();
-    lv_label_set_text(boot_text_label, "Reading NVS...");
+    ESP_LOGI("NVS", "Initialized NVS...");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    lv_async_call(update_boot_label_cb, "Reading NVS...");
     nvs_read_all_alias_to_list(); // 先读alias让chat_list里面的id被填上
+    ESP_LOGI("NVS", "Reading NVS...");
     nvs_read_all_user_color_to_list();
+    ESP_LOGI("NVS", "Reading NVS...");
     nvs_read_all_interface_color_to_list();
-    lv_label_set_text(boot_text_label, "Restoring Flash Offset...");
+    ESP_LOGI("NVS", "Reading NVS...");
+    nvs_read_sleep_time();
+    ESP_LOGI("NVS", "Reading NVS...");
+    nvs_read_brightness();
+    ESP_LOGI("NVS", "Reading NVS...");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    lv_async_call(update_boot_label_cb, "Restoring Flash Offset...");
     uint32_t valid_len = chat_storage_scan();
     g_write_offset = valid_len;
-    lv_label_set_text(boot_text_label, "Updating Latest Message Time...");
+    ESP_LOGI("FLASH", "Restoring Flash Offset...");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    lv_async_call(update_boot_label_cb, "Updating Latest Message Time...");
     update_chat_list_last_time();
+    ESP_LOGI("FLASH", "Updating Latest Message Time...");
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     // 设置事件标志，通知 UI 任务初始化已完成
     xEventGroupSetBits(init_event_group, INIT_DONE_BIT);
@@ -487,7 +525,6 @@ void app_main(void)
     spi_init();
     lcd_init();
     ui_init();
-    create_ui();
 
     scr_loading = lv_obj_create(NULL);
     lv_obj_t *spinner = lv_spinner_create(scr_loading);
@@ -506,10 +543,26 @@ void app_main(void)
         20);
     
     lv_screen_load(scr_loading); // 加载开机动画屏幕
+
+    last_activity_time_us = esp_timer_get_time();
+
+    ESP_LOGI("SLEEP_BOOT", "auto_sleep_timeout: %u", auto_sleep_timeout);
+
+    // 创建LVGL Tick定时器
+    const esp_timer_create_args_t periodic_timer_args = {
+        .callback = &lvgl_tick_cb,
+        .name = "periodic_gui"
+    };
+    esp_timer_handle_t periodic_timer;
+    esp_timer_create(&periodic_timer_args, &periodic_timer);
+    esp_timer_start_periodic(periodic_timer, 1000); // 1000us
+    
+    // xTaskCreatePinnedToCore(lv_timer_handler_task, "lvgl_t_h", 8192, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(app_main_task, "app_main", 8192, NULL, 5, NULL, 1);
+
+    vTaskDelay(pdMS_TO_TICKS(50));
     
     xTaskCreatePinnedToCore(peripheral_init_task, "periph_init", 4096, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(app_main_task, "app_main", 8192, NULL, 5, NULL, 1);
-    xTaskCreatePinnedToCore(lvgl_tick_task, "lvgl_tick", 1024, NULL, 5, NULL, 1);
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
