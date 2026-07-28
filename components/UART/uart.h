@@ -14,5 +14,6 @@ void uart_transmit(const uint8_t *data, size_t size);
 uint8_t buildLoRaFrame(uint8_t* buf, uint8_t self_id, uint8_t target_id, const char* data_str);
 ParseStatus parseLoRaFrame(const uint8_t* buf, uint8_t buf_len, LoRaFrameData* out);
 void send_lora_packet(uint8_t target_id, const uint8_t* frame_buf, uint8_t frame_len);
+void heartbeat_task(void *arg);
 
 #endif

@@ -5,6 +5,7 @@
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "pwm.h"
 #include "spi.h"
@@ -59,6 +60,7 @@ void app_main_task(void *arg)
     bool just_woken_up_by_aux = false;
     uint32_t last_battery_check_time = 0;
     uint32_t last_time_check_time = 0;
+    uint32_t last_mem_check_time = 0;
     uint8_t current_soc = 100;
     uint32_t sntp_start_time = 0;
 
@@ -509,6 +511,17 @@ void app_main_task(void *arg)
             //     }
             // }
 
+            {
+                uint32_t current_tick = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                if (current_tick - last_mem_check_time >= 10000) {
+                    last_mem_check_time = current_tick;
+                    size_t free_heap = esp_get_free_heap_size();
+                    size_t min_free = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
+                    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+                    ESP_LOGI("MEM", "Free: %u KB  Min: %u KB  PSRAM: %u KB",
+                             (unsigned)(free_heap / 1024), (unsigned)(min_free / 1024), (unsigned)(free_psram / 1024));
+                }
+            }
             {
                 uint32_t current_tick = xTaskGetTickCount() * portTICK_PERIOD_MS;
                 if (current_tick - last_time_check_time >= 2000) {

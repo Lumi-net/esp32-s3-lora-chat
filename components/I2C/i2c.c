@@ -8,9 +8,9 @@
 #include "esp_log.h"
 #include "math.h"
 
-#define INA219_PWR_PIN      GPIO_NUM_35  // 给 INA219 供电的 GPIO
-#define I2C_MASTER_SDA_IO   GPIO_NUM_36
-#define I2C_MASTER_SCL_IO   GPIO_NUM_37
+#define INA219_PWR_PIN      GPIO_NUM_1   // 给 INA219 供电的 GPIO
+#define I2C_MASTER_SDA_IO   GPIO_NUM_2
+#define I2C_MASTER_SCL_IO   GPIO_NUM_42
 #define I2C_MASTER_NUM      I2C_NUM_0     // 【修改】去除了原代码中重复的宏定义
 #define I2C_MASTER_FREQ_HZ  400000
 
