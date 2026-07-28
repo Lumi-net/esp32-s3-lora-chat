@@ -17,7 +17,7 @@ idf.py -p PORT flash monitor
 
 ## Project Map
 
-All source is in `main/main.c` + 13 local components under `components/`.
+All source is in `main/main.c` + 12 local components under `components/`.
 
 | Component | Role |
 |-----------|------|
@@ -35,8 +35,6 @@ All source is in `main/main.c` + 13 local components under `components/`.
 | `I2C/` | I2C master (INA219 battery monitor, currently disabled) |
 | `FONTS/` | Custom bitmap fonts (jbm10/12/14) |
 | `IMAGES/` | LOCK/SHIFT bitmaps |
-| `GAME/` | 2048 game |
-
 `managed_components/lvgl__lvgl/` — LVGL 9.4.0 (fetched via `idf.py` component manager).
 
 ## Architecture

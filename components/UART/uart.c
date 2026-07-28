@@ -388,8 +388,6 @@ void heartbeat_task(void *arg) {
         uint8_t frame_buf[131];
         uint8_t frame_len = buildLoRaFrame(frame_buf, self_id, 0xFF, "HB");
         
-        lora_wake(); // 【关键】发送前唤醒
         send_lora_packet(0xFF, frame_buf, frame_len);
-        lora_sleep(); // 【关键】发送后立刻休眠
     }
 }

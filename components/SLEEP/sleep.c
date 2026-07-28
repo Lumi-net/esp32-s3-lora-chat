@@ -4,6 +4,7 @@
 #include "esp_timer.h"
 #include "esp_sleep.h"
 #include "driver/gpio.h"
+#include "driver/uart.h"
 #include "esp_pm.h"
 #include "driver/rtc_io.h" // 新增：用于 rtc_gpio 系列函数配置 EXT0/EXT1
 #include "va.h"           // 假设 last_activity_time_us, auto_sleep_timeout, appQueue 在这里声明
@@ -38,12 +39,18 @@ bool check_and_enter_sleep(void)
 static void configure_wakeup_sources(void)
 {
     // ==========================================
-    // 0. 确保键盘行引脚输出高电平 (开漏释放，由上拉维持)
-    // 这样按键按下时，列引脚才能被拉低
+    // 0. 键盘行引脚设为 RTC GPIO 输出低电平
+    // 使用 RTC GPIO 而非数字 GPIO，确保 sleep 期间电平保持
+    // 同时关闭上拉，避免 NMOS 对抗上拉电阻浪费电流 (~73µA/脚)
+    // 这样按键按下时，行→列导通，列引脚被拉低触发 EXT1
     // ==========================================
     const int rowPins[4] = {GPIO_NUM_5, GPIO_NUM_6, GPIO_NUM_7, GPIO_NUM_4};
     for (int i = 0; i < 4; i++) {
-        gpio_set_level(rowPins[i], 1);
+        rtc_gpio_init(rowPins[i]);
+        rtc_gpio_set_direction(rowPins[i], RTC_GPIO_MODE_OUTPUT_ONLY);
+        rtc_gpio_set_level(rowPins[i], 0);
+        rtc_gpio_pullup_dis(rowPins[i]);
+        rtc_gpio_pulldown_dis(rowPins[i]);
     }
 
     // ==========================================
@@ -96,7 +103,7 @@ static bool check_wakeup_pins_idle(void) {
 int enter_light_sleep(void)
 {
     int wakeup_source = 0;
-    ESP_LOGI("POWER", "No activity for %lld ms. Entering Light Sleep...", (long long)(auto_sleep_timeout / 1000));
+    ESP_LOGI("POWER", "No activity for %u s. Entering Light Sleep...", auto_sleep_timeout);
 
     // 1. 关闭屏幕背光以最大化省电
     duty_set(0);
@@ -110,7 +117,13 @@ int enter_light_sleep(void)
         return 0; 
     }
 
-    // 3. 进入 Light-sleep (此函数会阻塞，直到被唤醒)
+    // 3. 等待串口输出完毕，避免睡眠时截断 log
+    // 控制台 UART 未安装 driver，不能用 uart_wait_tx_done；延时足够 FIFO 移出
+    vTaskDelay(pdMS_TO_TICKS(20));
+    // LoRa UART 已安装 driver，等待发送完成
+    uart_wait_tx_done(UART_NUM_1, pdMS_TO_TICKS(200));
+
+    // 4. 进入 Light-sleep (此函数会阻塞，直到被唤醒)
     esp_err_t ret = esp_light_sleep_start();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to enter light sleep: %s", esp_err_to_name(ret));
@@ -138,19 +151,23 @@ int enter_light_sleep(void)
     // ================= 唤醒后执行从这里开始 =================
     ESP_LOGI("POWER", "Woke up from Light Sleep!");
 
-    // 4. 【关键】恢复 RTC IO 为普通数字 GPIO
+    // 5. 【关键】恢复所有 RTC IO 为普通数字 GPIO
     // 文档指出：EXT0/EXT1 唤醒后，引脚会被硬件自动配置为 RTC IO。
     // 在将其用作普通数字 GPIO (如调用 key_init) 前，必须调用 rtc_gpio_deinit。
     rtc_gpio_deinit(WAKEUP_AUX_GPIO_PIN);
+    const int rowPins[4] = {GPIO_NUM_5, GPIO_NUM_6, GPIO_NUM_7, GPIO_NUM_4};
+    for (int i = 0; i < 4; i++) {
+        rtc_gpio_deinit(rowPins[i]);
+    }
     const int colPins[4] = {GPIO_NUM_16, GPIO_NUM_17, GPIO_NUM_18, GPIO_NUM_8};
     for (int i = 0; i < 4; i++) {
         rtc_gpio_deinit(colPins[i]);
     }
 
-    // 5. 恢复键盘 GPIO 到正常工作状态
+    // 6. 恢复键盘 GPIO 到正常工作状态
     key_init();
 
-    // 6. 判断唤醒源
+    // 7. 判断唤醒源
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause == ESP_SLEEP_WAKEUP_EXT0) {
         ESP_LOGI("POWER", ">>> Wakeup Source: AUX (LoRa) via EXT0");
@@ -164,7 +181,7 @@ int enter_light_sleep(void)
         ESP_LOGI("POWER", ">>> Wakeup Source: Other (Cause: %d)", cause);
     }
 
-    // 7. 重置活动计时器，防止唤醒后立即再次判定超时
+    // 8. 重置活动计时器，防止唤醒后立即再次判定超时
     last_activity_time_us = esp_timer_get_time();
     
     if (wakeup_source == 1) {
