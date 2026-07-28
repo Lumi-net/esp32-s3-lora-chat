@@ -12,3 +12,5 @@ void nvs_read_all_user_color_to_list(void);
 void nvs_read_all_interface_color_to_list(void);
 void nvs_read_sleep_time(void);
 void nvs_read_brightness(void);
+esp_err_t nvs_set_status_title(const char *title);
+void nvs_read_status_title(void);

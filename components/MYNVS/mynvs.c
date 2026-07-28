@@ -368,9 +368,6 @@ void nvs_read_sleep_time(void) {
         return;
     }
 
-    nvs_iterator_t it = NULL;
-    nvs_entry_find("nvs", NVS_NAMESPACE, NVS_TYPE_U16, &it);
-
     uint16_t time = 300;
     esp_err_t err = nvs_get_u16(handle, "st", &time);
     if (err == ESP_OK) {
@@ -392,26 +389,65 @@ void nvs_read_brightness(void) {
         return;
     }
 
-    nvs_iterator_t it = NULL;
-    nvs_entry_find("nvs", NVS_NAMESPACE, NVS_TYPE_U16, &it);
-
-    while (it != NULL) {
-        nvs_entry_info_t info;
-        nvs_entry_info(it, &info);
-        uint16_t brightness = 500;
-        if (strcmp(info.key, "br") == 0) {
-            if (nvs_get_u16(handle, info.key, &brightness) == ESP_OK) {
-                if (brightness > 1000) brightness = 1000;
-                scr_brightness = brightness;
-                ESP_LOGI(TAG, "Read Brightness: %u", brightness);
-            } else {
-                ESP_LOGW(TAG, "Failed to get u16 for key: %s", info.key);
-            }
-        }
-        
-        nvs_entry_next(&it); // 移动到下一个
+    uint16_t brightness = 500;
+    esp_err_t err = nvs_get_u16(handle, "br", &brightness);
+    if (err == ESP_OK) {
+        if (brightness > 1000) brightness = 1000;
+        scr_brightness = brightness;
+        ESP_LOGI(TAG, "Read brightness: %u", brightness);
+    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "Key 'br' not found in NVS, using default: %u", scr_brightness);
+    } else {
+        ESP_LOGW(TAG, "Failed to get u16 for key: %s", "br");
     }
     
-    nvs_release_iterator(it); // 释放迭代器
+    nvs_close(handle);
+}
+
+esp_err_t nvs_set_status_title(const char *title) {
+    if (title == NULL) return ESP_ERR_INVALID_ARG;
+    if (strlen(title) > 16) {
+        ESP_LOGE(TAG, "Title too long! Max is 16 chars.");
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error opening NVS handle: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = nvs_set_str(handle, "tl", title);
+    if (err == ESP_OK) {
+        strncpy(status_title, title, sizeof(status_title) - 1);
+        status_title[sizeof(status_title) - 1] = '\0';
+        ESP_LOGI(TAG, "Saved Title: [%s] to NVS and RAM", status_title);
+    }
+
+    if (err == ESP_OK) {
+        nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return err;
+}
+
+void nvs_read_status_title(void) {
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS for title read");
+        return;
+    }
+
+    size_t len = sizeof(status_title);
+    esp_err_t err = nvs_get_str(handle, "tl", status_title, &len);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Read Title: [%s]", status_title);
+    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "Key 'tl' not found, using default: %s", status_title);
+    } else {
+        ESP_LOGW(TAG, "Failed to get str for key: %s", "tl");
+    }
+
     nvs_close(handle);
 }

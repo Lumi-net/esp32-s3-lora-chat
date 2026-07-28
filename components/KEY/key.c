@@ -15,20 +15,20 @@ uint8_t keyMap[4][4] = {
   {13, 14, 15, 16}
 };
 static const char candidate1[2][10] = {
-    {'1','2','3','4','5','6','7','8','9','0'},  // 未shift
-    {'!','?','\'','-','*','/','+','&',' ','.'}  // shifted
+    {'0','1','2','3','4','5','6','7','8','9'},  // 未shift
+    {'.','!','?','\'','-','*','/','+','&',' '}  // shifted
 };
 static const char candidate2[2][10] = {
-    {'a','d','g','j','m','p','s','v','y',' '},  // 未shift
-    {'A','D','G','J','M','P','S','V','Y',','}  // shifted
+    {' ','a','d','g','j','m','p','s','v','y'},  // 未shift
+    {',','A','D','G','J','M','P','S','V','Y'}  // shifted
 };
 static const char candidate3[2][10] = {
-    {'b','e','h','k','n','q','t','w','z','^'},  // 未shift
-    {'B','E','H','K','N','Q','T','W','Z',':'}  // shifted
+    {'^','b','e','h','k','n','q','t','w','z'},  // 未shift
+    {':','B','E','H','K','N','Q','T','W','Z'}  // shifted
 };
 static const char candidate4[2][10] = {
-    {'c','f','i','l','o','r','u','x','(','='},  // 未shift
-    {'C','F','I','L','O','R','U','X',')','_'}  // shifted
+    {'=','c','f','i','l','o','r','u','x','('},  // 未shift
+    {'_','C','F','I','L','O','R','U','X',')'}  // shifted
 };
 static const uint8_t num_to_char[17] = {
     10,             // 0 (占位)
@@ -106,12 +106,14 @@ uint8_t scanKey() {
                 case 1: case 2: case 3: case 5: case 6: case 7: case 9: case 10: case 11: case 14: // 数字键
                     if (waited_to_choose) {
                         waited_to_choose = false;
+                        choose = 20; // state change
                     } else if (locked) {
                         choose = 5;
                         lockfun = currentKey;
                     } else {
                         waited_to_choose = true;
                         wait_choose = num_to_char[currentKey];
+                        choose = 20; // state change
                     }
                     break;
                 case 4: case 8: case 12: case 16: // 候选
@@ -131,6 +133,7 @@ uint8_t scanKey() {
                         lockfun = currentKey;
                     } else {
                         waited_to_choose = false;
+                        choose = 20; // state change
                     }
                     break;
                 case 13: // Shift
@@ -139,14 +142,17 @@ uint8_t scanKey() {
                     } else {
                         shifted = !shifted;
                     }
+                    choose = 20; // state change
                     break;
 
                 case 15: // BS&LOCK
                     if (waited_to_choose) {
                         waited_to_choose = false;
+                        choose = 20; // state change
                     } else {
                         if (shifted) {
                             locked = !locked;
+                            choose = 19; // LOCK_TOGGLE sentinel
                         } else {
                             choose = 8; // BS
                         }
@@ -161,12 +167,20 @@ uint8_t scanKey() {
     return choose;
 }
 
+void key_set_locked(bool state) {
+    locked = state;
+}
+
 void scanKeyTask(void *arg) {
     while (1) {
         uint8_t key = scanKey();
         if (key != 0) {
             printf("Key Pressed: %d\n", key);
-            xQueueSend(appQueue, &key, 0);
+            UIEvent event = {
+                .type = EVENT_KEY,
+                .key = key
+            };
+            xQueueSend(appQueue, &event, 0);
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }

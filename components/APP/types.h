@@ -23,6 +23,14 @@ typedef enum {
     SEND_STATE_WAITING_ACK   // 等待 ACK 状态
 } SendState;
 
+typedef enum {
+    LORA_STATUS_IDLE,        // 空闲等待接收 (绿色)
+    LORA_STATUS_RECEIVING,   // 正在接收 (蓝色)
+    LORA_STATUS_SENDING,     // 正在发送 (黄色)
+    LORA_STATUS_WAITING_ACK, // 已发送等待 ACK (紫色)
+    LORA_STATUS_TIMEOUT,     // ACK 超时 (红色)
+} LoRaStatus;
+
 typedef struct {
     uint8_t seq;
     uint8_t self_id;

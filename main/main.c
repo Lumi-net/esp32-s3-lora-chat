@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdbool.h>
 #include <sys/time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -32,6 +33,9 @@ static uint8_t pending_ack_seq = 0;  // 记录等待匹配的随机数
 static uint8_t pending_target_id = 0;   // 缓存目标ID，用于收到ACK后写Flash
 static uint32_t send_start_time = 0;    // 记录发送开始的时间戳
 static char pending_payload[121] = {0}; // 缓存发送的内容
+static uint32_t retry_delay_end_time = 0;   // 重试间隔结束时间 (0=不等待)
+static uint8_t last_seen_seq[256];          // 每个 self_id 最后收到的 seq (去重用)
+static bool   seen_peer[256];               // 记录是否曾收到该 self_id 的消息
 
 static void update_boot_label_cb(void *arg) {
     char *text = (char *)arg;
@@ -83,6 +87,7 @@ void app_main_task(void *arg)
                 ESP_LOGI("APP", "IC!5");
                 xTaskCreatePinnedToCore(scanKeyTask, "scan_key", 2048, NULL, 5, NULL, 0);
                 xTaskCreatePinnedToCore(uart_receive, "uart_receive", 4096, NULL, 5, NULL, 0);
+                xTaskCreatePinnedToCore(heartbeat_task, "heartbeat", 2048, NULL, 5, NULL, 0);
             }
         }
 
@@ -91,12 +96,38 @@ void app_main_task(void *arg)
             // 等待 ACK
             if (send_state == SEND_STATE_WAITING_ACK) {
                 uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
-                if (current_time - send_start_time >= ACK_TIMEOUT_MS) {
-                    ESP_LOGW("APP", "ACK timeout! seq: %d", pending_ack_seq);
-                    send_state = SEND_STATE_IDLE; // 超时重置状态，不写Flash，不清空输入框
-                    char toast_string[256];
-                    snprintf(toast_string, sizeof(toast_string), "Message failed to send! \nPlease check if the recipient is online!");
-                    show_toast_dialog(toast_string, 8000);
+
+                if (retry_delay_end_time > 0) {
+                    if (current_time >= retry_delay_end_time) {
+                        retry_delay_end_time = 0;
+                        lora_status = LORA_STATUS_SENDING;
+                        update_lora_status_indicator();
+                        uint8_t frame_buf[131];
+                        uint8_t frame_len = buildLoRaFrame(frame_buf, self_id, pending_target_id, pending_payload);
+                        frame_buf[2] = pending_ack_seq;
+                        frame_buf[10 + frame_buf[9]] = calculateCRC8(&frame_buf[2], 8 + frame_buf[9]);
+                        send_lora_packet(pending_target_id, frame_buf, frame_len);
+                        lora_status = LORA_STATUS_WAITING_ACK;
+                        update_lora_status_indicator();
+                        send_start_time = current_time;
+                    }
+                } else if (current_time - send_start_time >= ACK_TIMEOUT_MS) {
+                    ack_timeout_count++;
+                    ESP_LOGW("APP", "ACK timeout %d/5! seq: %d", ack_timeout_count, pending_ack_seq);
+                    if (ack_timeout_count >= 5) {
+                        send_state = SEND_STATE_IDLE;
+                        lora_status = LORA_STATUS_IDLE;
+                        ack_timeout_count = 0;
+                        update_lora_status_indicator();
+                        char toast_string[256];
+                        snprintf(toast_string, sizeof(toast_string), "Message failed to send! \nPlease check if the recipient is online!");
+                        show_toast_dialog(toast_string, 8000);
+                    } else {
+                        lora_status = LORA_STATUS_TIMEOUT;
+                        update_lora_status_indicator();
+                        lv_timer_handler();
+                        retry_delay_end_time = current_time + 500;
+                    }
                 }
             }
             // 读队列
@@ -109,6 +140,10 @@ void app_main_task(void *arg)
                         {
                             ESP_LOGI("APP", "ACK received! seq: %d", pending_ack_seq);
                             send_state = SEND_STATE_IDLE;
+                            ack_timeout_count = 0;
+                            retry_delay_end_time = 0;
+                            lora_status = LORA_STATUS_RECEIVING;
+                            update_lora_status_indicator();
 
                             // 写Flash
                             LoRaFrameData msg_frame = {0};
@@ -158,10 +193,14 @@ void app_main_task(void *arg)
                             input_remaining_chars = 120;
                             lv_label_set_text_fmt(input_cnt_left, "%d", input_remaining_chars);
                             ui_chat_append_new_message(&msg_frame);
+                            lora_status = LORA_STATUS_IDLE;
+                            update_lora_status_indicator();
                         }
                     }
                     else
                     {
+                        lora_status = LORA_STATUS_RECEIVING;
+                        update_lora_status_indicator();
                         if (event.frame.target_id == 0xFF && event.frame.data_len >= 2 && strncmp(event.frame.data_str, "HB", 2) == 0) // 收到心跳
                         {
                             // 收到心跳广播：更新时间戳
@@ -177,12 +216,19 @@ void app_main_task(void *arg)
                                 cur_minute = timeinfo->tm_min;
                             }
                             
-                            chat_list[event.frame.self_id].last_time = cur_month * 1000000 + 
-                                                                    cur_day * 10000 + 
-                                                                    cur_hour * 100 + 
-                                                                    cur_minute;
+                            if (event.frame.self_id != self_id) {
+                                chat_list[event.frame.self_id].last_online = cur_month * 1000000 + 
+                                                                            cur_day * 10000 + 
+                                                                            cur_hour * 100 + 
+                                                                            cur_minute;
+                            }
                         }
                         else { // 收到消息 UART收到消息会先发ACK再传队列 这里不需要发了
+                            if (event.frame.data_len > 0 && seen_peer[event.frame.self_id] && last_seen_seq[event.frame.self_id] == event.frame.seq) {
+                                ESP_LOGI("APP", "Dup msg from %02X seq=%d, skip", event.frame.self_id, event.frame.seq);
+                            } else {
+                                seen_peer[event.frame.self_id] = true;
+                                last_seen_seq[event.frame.self_id] = event.frame.seq;
                             esp_err_t err = chat_storage_append(&event.frame);
                             if (err != ESP_OK) {
                                 ESP_LOGE("FLASH", "Save chat failed: %s", esp_err_to_name(err));
@@ -196,7 +242,9 @@ void app_main_task(void *arg)
                             if (g_chat_target_id == event.frame.self_id) {
                                 ui_chat_append_new_message(&event.frame);
                             }
-                            
+                            lora_status = LORA_STATUS_IDLE;
+                            update_lora_status_indicator();
+                            }
                         }
                     }
                     if (just_woken_up_by_aux) {
@@ -210,6 +258,10 @@ void app_main_task(void *arg)
                     key = event.key;
                     switch(key)
                     {   
+                        case 20: // KEY_STATE_CHANGE sentinel
+                            break;
+                        case 19: // LOCK_TOGGLE sentinel
+                            break;
                         case 8: // BS
                             lv_textarea_delete_char(g_ta);
                             size_t talen = strlen(lv_textarea_get_text(g_ta));
@@ -234,6 +286,8 @@ void app_main_task(void *arg)
                             // }
                             // printf("\n");
                             // printf("Frame Length: %d bytes\n", frame_len);
+                            lora_status = LORA_STATUS_SENDING;
+                            update_lora_status_indicator();
                             send_lora_packet(g_chat_target_id, frame_buf, frame_len);
 
                             pending_ack_seq = frame_buf[2]; // 从构建好的帧中提取seq
@@ -242,6 +296,8 @@ void app_main_task(void *arg)
                             pending_payload[120] = '\0';
 
                             send_state = SEND_STATE_WAITING_ACK;
+                            lora_status = LORA_STATUS_WAITING_ACK;
+                            update_lora_status_indicator();
                             send_start_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
                             // 等待 ACK (转 EVENT_UART)
                             break;
@@ -293,8 +349,24 @@ void app_main_task(void *arg)
                                     lv_label_set_text_fmt(input_cnt_left, "%d", input_remaining_chars);
                                     break;
                                 case 12: // PGUP
+                                    if (current_page_id == PAGE_MENU) {
+                                        menu_up();
+                                    } else if (current_page_id == PAGE_SETTINGS) {
+                                        settings_up();
+                                    } else if (current_page_id == PAGE_CHAT) {
+                                        lv_obj_scroll_by(g_chat_scroll_container, 0,
+                                            -(lv_obj_get_height(g_chat_scroll_container) - 10), LV_ANIM_ON);
+                                    }
                                     break;
                                 case 16: // PGDOWN
+                                    if (current_page_id == PAGE_MENU) {
+                                        menu_down();
+                                    } else if (current_page_id == PAGE_SETTINGS) {
+                                        settings_down();
+                                    } else if (current_page_id == PAGE_CHAT) {
+                                        lv_obj_scroll_by(g_chat_scroll_container, 0,
+                                            lv_obj_get_height(g_chat_scroll_container) - 10, LV_ANIM_ON);
+                                    }
                                     break; 
                             }
                             break;
@@ -306,6 +378,7 @@ void app_main_task(void *arg)
                             }
                             break;
                     }
+                    update_keyboard_icons();
                 } else if (event.type == EVENT_WIFI) {
                     current_wifi_state = event.wifi_state;
                 } 
@@ -459,6 +532,7 @@ void app_main_task(void *arg)
                 }
             }
         }
+        update_lora_status_indicator();
         lv_timer_handler();
         vTaskDelay(pdMS_TO_TICKS(5));
     }
@@ -496,6 +570,8 @@ void peripheral_init_task(void *arg)
     nvs_read_sleep_time();
     ESP_LOGI("NVS", "Reading NVS...");
     nvs_read_brightness();
+    ESP_LOGI("NVS", "Reading NVS...");
+    nvs_read_status_title();
     ESP_LOGI("NVS", "Reading NVS...");
     vTaskDelay(pdMS_TO_TICKS(50));
     lv_async_call(update_boot_label_cb, "Restoring Flash Offset...");

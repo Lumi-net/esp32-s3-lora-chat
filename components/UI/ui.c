@@ -2,8 +2,7 @@
 
 #include "esp_log.h"
 #include "esp_random.h"
-#include "SHIFT.h"
-#include "LOCK.h"
+#include "key.h"
 #include "lcd.h"
 #include "va.h"
 #include "wifi.h"
@@ -50,8 +49,11 @@ lv_obj_t *cur_page = NULL;
 // lv_obj_t *menu_page = NULL;
 lv_obj_t *g_ta = NULL;
 lv_obj_t *input_cnt_left = NULL;
-uint8_t input_remaining_chars = 0;
+uint8_t input_remaining_chars = 120;
 lv_obj_t *page_cursor = NULL;
+lv_obj_t *lora_status_indicator = NULL;
+lv_obj_t *shift_icon_obj = NULL;
+lv_obj_t *lock_icon_obj = NULL;
 lv_obj_t *soc_label = NULL;
 lv_obj_t *time_label = NULL;
 lv_obj_t *title_label = NULL;
@@ -84,6 +86,7 @@ static const char *settings_items[] = {
     "Time",
     "Auto Sleep Time",
     "Change Brightness",
+    "Customize Title",
     "Add/Remove a contact",
 };
 
@@ -135,7 +138,7 @@ void lvgl_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map
 {
     uint16_t x1 = area->x1, x2 = area->x2;
     uint16_t y1 = area->y1, y2 = area->y2;
-        
+
     // esp_lcd 自动处理 PSRAM 的 Cache 同步，直接传入 px_map 即可
     esp_lcd_panel_draw_bitmap(panel_handle, x1, y1, x2 + 1, y2 + 1, px_map);
     
@@ -202,10 +205,19 @@ void create_ui(void) {
 
     /* 状态栏文字：中间标题 */
     title_label = lv_label_create(status_bar);
-    lv_label_set_text(title_label, "Lumi-net");
+    lv_label_set_text(title_label, status_title);
     lv_obj_set_style_text_color(title_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), LV_STATE_DEFAULT);
     lv_obj_align(title_label, LV_ALIGN_CENTER, 0, 0);   // 水平垂直居中
     lv_obj_set_style_text_font(title_label, &jbm10, LV_PART_MAIN);
+
+    /* 状态栏：LoRa 状态指示小方块 */
+    lora_status_indicator = lv_obj_create(status_bar);
+    lv_obj_remove_style_all(lora_status_indicator);
+    lv_obj_set_size(lora_status_indicator, 8, 8);
+    lv_obj_set_style_radius(lora_status_indicator, 1, 0);
+    lv_obj_set_style_bg_opa(lora_status_indicator, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(lora_status_indicator, lv_palette_main(LV_PALETTE_GREEN), 0);
+    lv_obj_align(lora_status_indicator, LV_ALIGN_RIGHT_MID, -48, 0);
 
     /* 状态栏文字：电池图标 */
     soc_label = lv_label_create(status_bar);
@@ -240,7 +252,7 @@ void create_ui(void) {
     lv_obj_set_style_bg_opa(input_area, LV_OPA_TRANSP, LV_STATE_DEFAULT); // 总输入区域
     lv_obj_set_style_radius(input_area, 10, LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(input_area, 0, LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_all(input_area, 6, 0);
+    lv_obj_set_style_pad_all(input_area, 3, 0);
     lv_obj_set_height(input_area, LV_SIZE_CONTENT);
     lv_obj_set_style_min_height(input_area, 48, LV_STATE_DEFAULT);
     lv_obj_set_flex_flow(input_area, LV_FLEX_FLOW_ROW);
@@ -253,20 +265,17 @@ void create_ui(void) {
     lv_obj_set_flex_flow(input_left_panel, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(input_left_panel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(input_left_panel, 0, LV_STATE_DEFAULT);
-    lv_obj_set_width(input_left_panel, 28);
+    lv_obj_set_width(input_left_panel, 48);
     lv_obj_set_height(input_left_panel, 36);
 
-    lv_obj_t *input_icon_container = lv_obj_create(input_left_panel); // SHIFT和候选&LOCK
-    lv_obj_remove_style_all(input_icon_container);
-    lv_obj_set_style_bg_opa(input_icon_container, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_border_width(input_icon_container, 0, LV_PART_MAIN);
-    lv_obj_set_flex_flow(input_icon_container, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(input_icon_container, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(input_icon_container, 6, LV_STATE_DEFAULT);
-    lv_obj_set_width(input_icon_container, LV_SIZE_CONTENT); 
-    lv_obj_set_height(input_icon_container, 24); 
+    lv_obj_t *input_icon_container = lv_obj_create(input_left_panel);
+    lv_obj_set_style_bg_opa(input_icon_container, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(input_icon_container, 0, 0);
+    lv_obj_set_style_pad_all(input_icon_container, 0, 0);
+    lv_obj_set_size(input_icon_container, 48, 22);
+    lv_obj_set_scrollbar_mode(input_icon_container, LV_SCROLLBAR_MODE_OFF);
 
-    input_cnt_left = lv_label_create(input_left_panel); // 剩余字数显示
+    input_cnt_left = lv_label_create(input_left_panel);
     lv_label_set_text_fmt(input_cnt_left, "%d", input_remaining_chars);
     lv_obj_set_style_text_color(input_cnt_left, lv_color_hex(color_index[COLOR_MSG_TEXT].color), LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(input_cnt_left, &jbm10, LV_PART_MAIN);
@@ -274,12 +283,39 @@ void create_ui(void) {
     lv_obj_set_style_text_align(input_cnt_left, LV_TEXT_ALIGN_RIGHT, LV_STATE_DEFAULT);
     lv_obj_set_height(input_cnt_left, 10); 
 
-    lv_obj_t *shift_icon = lv_image_create(input_icon_container); // SHIFT
-    lv_image_set_src(shift_icon, &SHIFT);
-    // lv_obj_align(shift_icon, LV_ALIGN_BOTTOM_MID, 0, 0); 
-    lv_obj_t *lock_icon = lv_image_create(input_icon_container); // LOCK
-    lv_image_set_src(lock_icon, &LOCK);
-    // lv_obj_align(lock_icon, LV_ALIGN_BOTTOM_MID, 0, 0); 
+    shift_icon_obj = lv_obj_create(input_icon_container);
+    lv_obj_remove_style_all(shift_icon_obj);
+    lv_obj_set_size(shift_icon_obj, 22, 22);
+    lv_obj_set_style_border_width(shift_icon_obj, 1, 0);
+    lv_obj_set_style_border_opa(shift_icon_obj, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(shift_icon_obj, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
+    lv_obj_set_style_radius(shift_icon_obj, 3, 0);
+    lv_obj_set_style_bg_opa(shift_icon_obj, LV_OPA_TRANSP, 0);
+    lv_obj_align(shift_icon_obj, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_t *shift_l = lv_label_create(shift_icon_obj);
+    lv_label_set_text(shift_l, "S");
+    lv_obj_set_style_text_font(shift_l, &jbm10, 0);
+    lv_obj_set_style_text_color(shift_l, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
+    lv_obj_center(shift_l);
+    lv_obj_set_style_bg_opa(shift_l, LV_OPA_TRANSP, 0);
+
+    lock_icon_obj = lv_obj_create(input_icon_container);
+    lv_obj_remove_style_all(lock_icon_obj);
+    lv_obj_set_size(lock_icon_obj, 22, 22);
+    lv_obj_set_style_border_width(lock_icon_obj, 1, 0);
+    lv_obj_set_style_border_opa(lock_icon_obj, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(lock_icon_obj, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
+    lv_obj_set_style_radius(lock_icon_obj, 3, 0);
+    lv_obj_set_style_bg_opa(lock_icon_obj, LV_OPA_TRANSP, 0);
+    lv_obj_align(lock_icon_obj, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_t *lock_l = lv_label_create(lock_icon_obj);
+    lv_label_set_text(lock_l, "?");
+    lv_obj_set_style_text_font(lock_l, &jbm10, 0);
+    lv_obj_set_style_text_color(lock_l, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
+    lv_obj_center(lock_l);
+    lv_obj_set_style_bg_opa(lock_l, LV_OPA_TRANSP, 0);
+
+    update_keyboard_icons();
 
 
     /* 在容器内创建一个文本区域作为真实的输入框 */
@@ -297,7 +333,7 @@ void create_ui(void) {
     lv_obj_set_style_pad_top(g_ta, 4, 0);
     lv_obj_set_style_pad_bottom(g_ta, 4, 0);
     lv_obj_set_style_pad_left(g_ta, 10, LV_STATE_DEFAULT);
-    lv_obj_set_style_pad_right(g_ta, 8, LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(g_ta, 4, LV_STATE_DEFAULT);
     lv_obj_set_height(g_ta, LV_SIZE_CONTENT);
     lv_obj_set_style_min_height(g_ta, 40, LV_STATE_DEFAULT);
     lv_obj_set_style_max_height(g_ta, 100, LV_STATE_DEFAULT);
@@ -335,13 +371,76 @@ void show_toast_dialog(const char *msg, uint32_t auto_close_ms)
 
     // 2. 创建新的弹窗
     g_current_toast = lv_msgbox_create(lv_screen_active());
-    lv_obj_add_flag(lv_msgbox_get_header(g_current_toast), LV_OBJ_FLAG_HIDDEN); // 隐藏标题栏和叉号 太丑了
     lv_msgbox_add_title(g_current_toast, "提示");
+    lv_obj_add_flag(lv_msgbox_get_header(g_current_toast), LV_OBJ_FLAG_HIDDEN);
     lv_msgbox_add_text(g_current_toast, msg);
     lv_obj_center(g_current_toast);
 
     // 3. 创建定时器（user_data 传 NULL 即可，因为我们用全局变量）
     lv_timer_create(toast_auto_close_cb, auto_close_ms, NULL);
+}
+
+void update_keyboard_icons(void)
+{
+    if (!shift_icon_obj || !lock_icon_obj) return;
+
+    lv_color_t base = lv_color_hex(color_index[COLOR_MSG_TEXT].color);
+    lv_color_t invert = lv_color_hex(0xFFFFFF - color_index[COLOR_MSG_TEXT].color);
+
+    lv_obj_t *shift_l = lv_obj_get_child(shift_icon_obj, 0);
+    lv_obj_t *lock_l = lv_obj_get_child(lock_icon_obj, 0);
+
+    if (shifted) {
+        lv_obj_set_style_bg_color(shift_icon_obj, base, 0);
+        lv_obj_set_style_bg_opa(shift_icon_obj, LV_OPA_COVER, 0);
+        lv_obj_set_style_text_color(shift_l, invert, 0);
+    } else {
+        lv_obj_set_style_bg_opa(shift_icon_obj, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_text_color(shift_l, base, 0);
+    }
+
+    if (locked) {
+        lv_obj_set_style_bg_color(lock_icon_obj, base, 0);
+        lv_obj_set_style_bg_opa(lock_icon_obj, LV_OPA_COVER, 0);
+        lv_obj_set_style_text_color(lock_l, invert, 0);
+        lv_label_set_text(lock_l, "L");
+    } else if (waited_to_choose) {
+        lv_obj_set_style_bg_opa(lock_icon_obj, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_text_color(lock_l, base, 0);
+        char digit[2] = {(char)('0' + wait_choose), '\0'};
+        lv_label_set_text(lock_l, digit);
+    } else {
+        lv_obj_set_style_bg_opa(lock_icon_obj, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_text_color(lock_l, base, 0);
+        lv_label_set_text(lock_l, "?");
+    }
+}
+
+void update_lora_status_indicator(void)
+{
+    if (!lora_status_indicator) return;
+    lv_color_t color;
+    switch (lora_status) {
+        case LORA_STATUS_IDLE:
+            color = lv_palette_main(LV_PALETTE_GREEN);
+            break;
+        case LORA_STATUS_RECEIVING:
+            color = lv_palette_main(LV_PALETTE_BLUE);
+            break;
+        case LORA_STATUS_SENDING:
+            color = lv_palette_main(LV_PALETTE_YELLOW);
+            break;
+        case LORA_STATUS_WAITING_ACK:
+            color = lv_palette_main(LV_PALETTE_PURPLE);
+            break;
+        case LORA_STATUS_TIMEOUT:
+            color = lv_palette_main(LV_PALETTE_RED);
+            break;
+        default:
+            color = lv_palette_main(LV_PALETTE_GREEN);
+            break;
+    }
+    lv_obj_set_style_bg_color(lora_status_indicator, color, 0);
 }
 
 // ==========================================
@@ -734,23 +833,24 @@ void ui_show_menu_page(void)
 
     current_page_id = PAGE_MENU;
 
-    // 创建光标
-    page_cursor = lv_label_create(cur_page);
-    lv_label_set_text(page_cursor, ">");
-    lv_obj_set_style_text_color(page_cursor, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
-    lv_obj_set_style_text_font(page_cursor, &jbm12, 0);
-
     // 1. 动态获取数据，构建按 ID 排序的映射表
     rebuild_valid_id_map(); 
 
     // 2. 处理空列表情况
     if (valid_cnt == 0) {
+        page_cursor = NULL;
         lv_obj_t *empty_label = lv_label_create(cur_page);
         lv_label_set_text(empty_label, "No Contacts");
         lv_obj_set_style_text_color(empty_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
         lv_obj_center(empty_label);
         return; // 直接返回，不创建列表项
     }
+
+    // 创建光标 (仅在存在联系人时)
+    page_cursor = lv_label_create(cur_page);
+    lv_label_set_text(page_cursor, ">");
+    lv_obj_set_style_text_color(page_cursor, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
+    lv_obj_set_style_text_font(page_cursor, &jbm12, 0);
 
     lv_obj_t *menu_container = lv_obj_create(cur_page);
     lv_obj_remove_style_all(menu_container);
@@ -764,7 +864,7 @@ void ui_show_menu_page(void)
     // 3. 创建列表项 UI
     uint8_t visible = (valid_cnt < MENU_VISIBLE_ITEMS) ? valid_cnt : MENU_VISIBLE_ITEMS;
 
-    const uint16_t ITEM_HEIGHT = 24; // 每行高度
+    const uint16_t ITEM_HEIGHT = 32; // 每行高度
     // const uint16_t ALIAS_WIDTH = 160; // Alias 标签固定宽度
     // const uint16_t ID_WIDTH = 30;     // ID 标签固定宽度
 
@@ -884,6 +984,8 @@ void ui_show_settings_page(void)
     lv_obj_set_size(cur_page, lv_pct(100), lv_pct(100));
     
     current_page_id = PAGE_SETTINGS;
+    key_set_locked(true);
+    update_keyboard_icons();
 
     // 2. 创建大标题 "Settings"
     lv_obj_t *title_label = lv_label_create(cur_page);
@@ -953,6 +1055,8 @@ void ui_show_settings_change_alias_or_user_color(void) {
     lv_label_set_text(detail_title_label, "Enter Target ID (00-FF)");
     lv_obj_set_style_text_color(detail_title_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
     lv_obj_set_style_text_font(detail_title_label, &jbm14, 0);
+    lv_obj_set_width(detail_title_label, 220);
+    lv_label_set_long_mode(detail_title_label, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
@@ -977,6 +1081,8 @@ void ui_show_settings_add_contact(void) {
     lv_label_set_text(detail_title_label, "Enter Target ID (00-FF)");
     lv_obj_set_style_text_color(detail_title_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
     lv_obj_set_style_text_font(detail_title_label, &jbm14, 0);
+    lv_obj_set_width(detail_title_label, 220);
+    lv_label_set_long_mode(detail_title_label, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
@@ -1001,6 +1107,8 @@ void ui_show_settings_change_interface_color(void) {
     lv_label_set_text(detail_title_label, "Enter Target ID");
     lv_obj_set_style_text_color(detail_title_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
     lv_obj_set_style_text_font(detail_title_label, &jbm14, 0);
+    lv_obj_set_width(detail_title_label, 220);
+    lv_label_set_long_mode(detail_title_label, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 
     // 4. 创建 UI: 提示
@@ -1036,6 +1144,8 @@ void ui_show_settings_wifi(void) {
     lv_label_set_text(detail_title_label, "Enter SSID (Max 32 chars) \nNotice: After input will try to connect to WiFi \nOr leave it blank to use soft AP to connect");
     lv_obj_set_style_text_color(detail_title_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
     lv_obj_set_style_text_font(detail_title_label, &jbm14, 0);
+    lv_obj_set_width(detail_title_label, 220);
+    lv_label_set_long_mode(detail_title_label, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
@@ -1060,6 +1170,8 @@ void ui_show_settings_time(void) {
     lv_label_set_text(detail_title_label, "Enter Time\nYearMonthDayHourMinuteSecond\nExample: 20260202114514\nOr leave it blank to use WiFi to sync time");
     lv_obj_set_style_text_color(detail_title_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
     lv_obj_set_style_text_font(detail_title_label, &jbm14, 0);
+    lv_obj_set_width(detail_title_label, 220);
+    lv_label_set_long_mode(detail_title_label, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
@@ -1084,6 +1196,8 @@ void ui_show_settings_sleep_time(void) {
     lv_label_set_text(detail_title_label, "Enter Auto Sleep Time\nUnit: second\nDefault: 300");
     lv_obj_set_style_text_color(detail_title_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
     lv_obj_set_style_text_font(detail_title_label, &jbm14, 0);
+    lv_obj_set_width(detail_title_label, 220);
+    lv_label_set_long_mode(detail_title_label, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
@@ -1108,6 +1222,31 @@ void ui_show_settings_brightness(void) {
     lv_label_set_text(detail_title_label, "Enter Brightness\n10~100\nDefault: 50");
     lv_obj_set_style_text_color(detail_title_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
     lv_obj_set_style_text_font(detail_title_label, &jbm14, 0);
+    lv_obj_set_width(detail_title_label, 220);
+    lv_label_set_long_mode(detail_title_label, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
+}
+
+void ui_show_settings_customize_title(void) {
+    if (cur_page) {
+        lv_obj_delete(cur_page);
+        cur_page = NULL;
+    }
+
+    cur_page = lv_obj_create(page_container);
+    lv_obj_remove_style_all(cur_page);
+    lv_obj_set_size(cur_page, lv_pct(100), lv_pct(100));
+
+    current_page_id = PAGE_SETTINGS_DETAIL;
+    current_detail_step = DETAIL_STEP_INPUT_ID;
+    target_change_id = 0xFF;
+
+    detail_title_label = lv_label_create(cur_page);
+    lv_label_set_text(detail_title_label, "Enter New Status Bar Title\nMax 16 characters\nDefault: Lumi-net");
+    lv_obj_set_style_text_color(detail_title_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
+    lv_obj_set_style_text_font(detail_title_label, &jbm14, 0);
+    lv_obj_set_width(detail_title_label, 220);
+    lv_label_set_long_mode(detail_title_label, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
@@ -1319,14 +1458,38 @@ void handle_settings_detail_enter(void) {
                 return;
             }
         }
-        if (selected == 7) { // "Add/Remove a contact"
+        else if (selected == 7) { // "Customize Title"
+            if (strlen(safe_input) == 0) return;
+
+            if (strlen(safe_input) > 16) {
+                ESP_LOGW("SETTINGS", "Title too long: %d", strlen(safe_input));
+                lv_label_set_text(detail_title_label, "Too long! Max 16 characters.");
+                lv_textarea_set_text(g_ta, "");
+                return;
+            }
+
+            esp_err_t err = nvs_set_status_title(safe_input);
+            if (err == ESP_OK) {
+                lv_label_set_text(title_label, status_title);
+                ESP_LOGI("SETTINGS", "Title Set OK: [%s]", status_title);
+                lv_label_set_text(detail_title_label, "OK!");
+                lv_textarea_set_text(g_ta, "");
+                lv_timer_create(deferred_show_settings_page, 2000, NULL);
+            } else {
+                ESP_LOGW("SETTINGS", "Title Set Failed: %s", esp_err_to_name(err));
+                lv_label_set_text(detail_title_label, "Something was wrong...\nPlease try again.");
+                lv_textarea_set_text(g_ta, "");
+                lv_timer_create(deferred_show_settings_page, 2000, NULL);
+            }
+        }
+        if (selected == 8) { // "Add/Remove a contact"
             if (strlen(safe_input) == 0) return; // 空输入忽略
 
             uint8_t id;
             bool ok = parse_uint16(safe_input, &id, 16, 8);
 
             // 验证 ID 是否有效 (必须在 0-255 范围内，且 chat_list 中该 ID 不存在)
-            if (!ok || id != 0xFF || chat_list[id].id != 0xFF) {
+            if (!ok || id == 0xFF || chat_list[id].id != 0xFF) {
                 ESP_LOGW("SETTINGS", "Invalid or exist ID: %d", id);
                 
                 // UI 反馈：显示错误并清空，让用户重试
@@ -1442,6 +1605,8 @@ void handle_settings_detail_enter(void) {
 }
 
 void ui_show_settings_detail_page(void) {
+    key_set_locked(false);
+    update_keyboard_icons();
     switch (selected)
     {
         case 0:
@@ -1466,6 +1631,9 @@ void ui_show_settings_detail_page(void) {
             ui_show_settings_brightness();
             break;
         case 7:
+            ui_show_settings_customize_title();
+            break;
+        case 8:
             ui_show_settings_add_contact();
             break;
         default:
