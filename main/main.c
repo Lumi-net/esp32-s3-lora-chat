@@ -89,7 +89,7 @@ void app_main_task(void *arg)
                 ESP_LOGI("APP", "IC!5");
                 xTaskCreatePinnedToCore(scanKeyTask, "scan_key", 2048, NULL, 5, NULL, 0);
                 xTaskCreatePinnedToCore(uart_receive, "uart_receive", 4096, NULL, 5, NULL, 0);
-                xTaskCreatePinnedToCore(heartbeat_task, "heartbeat", 2048, NULL, 5, NULL, 0);
+                xTaskCreatePinnedToCore(heartbeat_task, "heartbeat", 4096, NULL, 5, NULL, 0);
             }
         }
 
@@ -651,7 +651,7 @@ void app_main(void)
 
     vTaskDelay(pdMS_TO_TICKS(50));
     
-    xTaskCreatePinnedToCore(peripheral_init_task, "periph_init", 4096, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(peripheral_init_task, "periph_init", 8192, NULL, 5, NULL, 0);
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
