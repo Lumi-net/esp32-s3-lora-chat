@@ -33,6 +33,8 @@ set(include_dirs
 set(requires
             driver
             esp_timer
+            esp_driver_uart
+            esp_driver_ledc
             esp_driver_spi
             esp_lcd
             spi_flash

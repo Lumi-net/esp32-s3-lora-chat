@@ -1,4 +1,5 @@
 #include "pwm.h"
+#include "driver/gpio.h"
 
 void pwm_init(void)
 {

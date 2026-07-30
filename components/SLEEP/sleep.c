@@ -173,21 +173,21 @@ int enter_light_sleep(uint64_t timer_wakeup_us)
     key_init();
 
     // 7. 判断唤醒源
-    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-    if (cause == ESP_SLEEP_WAKEUP_EXT0) {
+    uint32_t causes = esp_sleep_get_wakeup_causes();
+    if (causes & BIT(ESP_SLEEP_WAKEUP_EXT0)) {
         ESP_LOGI("POWER", ">>> Wakeup Source: AUX (LoRa) via EXT0");
         wakeup_source = 2;
     } 
-    else if (cause == ESP_SLEEP_WAKEUP_EXT1) {
+    else if (causes & BIT(ESP_SLEEP_WAKEUP_EXT1)) {
         ESP_LOGI("POWER", ">>> Wakeup Source: Matrix Keypad via EXT1");
         wakeup_source = 1;
     } 
-    else if (cause == ESP_SLEEP_WAKEUP_TIMER) {
+    else if (causes & BIT(ESP_SLEEP_WAKEUP_TIMER)) {
         ESP_LOGI("POWER", ">>> Wakeup Source: Timer (Heartbeat)");
         wakeup_source = 3;
     }
     else {
-        ESP_LOGI("POWER", ">>> Wakeup Source: Other (Cause: %d)", cause);
+        ESP_LOGI("POWER", ">>> Wakeup Source: Other (Causes Bitmap: 0x%08" PRIx32 ")", causes);
     }
 
     // 8. 重置活动计时器，防止唤醒后立即再次判定超时
