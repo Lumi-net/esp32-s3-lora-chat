@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/spi_master.h"
+#include "esp_log.h"
 #include "esp_flash.h"
 #include "esp_flash_spi_init.h"
 #include "uart.h"
@@ -139,6 +140,14 @@ esp_err_t ext_flash_erase_sector(uint32_t addr)
 uint32_t ext_flash_size(void)
 {
     return s_flash_size;
+}
+
+esp_err_t ext_flash_erase_chip(void)
+{
+    if (s_ext_flash == NULL)
+        return ESP_ERR_INVALID_STATE;
+
+    return esp_flash_erase_chip(s_ext_flash);
 }
 
 esp_err_t meta_save(const meta_t *meta)
@@ -471,39 +480,60 @@ static esp_err_t read_forward_single_block(uint8_t block_idx, uint32_t offset,
 static esp_err_t read_backward_single_block(uint8_t block_idx, uint32_t *offset, LoRaFrameData *frame)
 {
     uint32_t end = *offset;
-    if (end == 0) return ESP_ERR_NOT_FOUND; // 已经读到块首了
+    if (end == 0) {
+        ESP_LOGI("FLASH", "bkrd blk=%u offset=0 -> NOT_FOUND", block_idx);
+        return ESP_ERR_NOT_FOUND;
+    }
 
     uint16_t fixed = offsetof(LoRaFrameData, data_str);
-    
-    // 计算最小记录长度
     uint16_t min_record_size = fixed + 0 + sizeof(frame->checksum) + sizeof(uint8_t) + sizeof(uint16_t);
-    if (end < min_record_size) return ESP_ERR_NOT_FOUND;
+    if (end < min_record_size) {
+        ESP_LOGI("FLASH", "bkrd blk=%u end=%u < min -> NOT_FOUND", block_idx, end);
+        return ESP_ERR_NOT_FOUND;
+    }
 
     uint32_t base = get_block_addr(block_idx);
     uint8_t tail_len;
     uint16_t magic;
     esp_err_t err;
 
-    // 读取 Magic
     err = ext_flash_read(base + end - sizeof(magic), &magic, sizeof(magic));
-    if (err != ESP_OK || magic != CHAT_MAGIC) return ESP_FAIL;
+    if (err != ESP_OK) {
+        ESP_LOGD("FLASH", "bkrd blk=%u end=%u magic read fail %d", block_idx, end, err);
+        return ESP_FAIL;
+    }
+    if (magic != CHAT_MAGIC) {
+        ESP_LOGI("FLASH", "bkrd blk=%u end=%u magic=0x%04X != 0x%04X", block_idx, end, magic, CHAT_MAGIC);
+        return ESP_FAIL;
+    }
 
-    // 读取尾部 data_len
     err = ext_flash_read(base + end - sizeof(magic) - sizeof(tail_len), &tail_len, sizeof(tail_len));
-    if (err != ESP_OK || tail_len > 129) return ESP_FAIL;
+    if (err != ESP_OK) {
+        ESP_LOGD("FLASH", "bkrd blk=%u end=%u tail_len read fail %d", block_idx, end, err);
+        return ESP_FAIL;
+    }
+    if (tail_len > 129) {
+        ESP_LOGD("FLASH", "bkrd blk=%u end=%u tail_len=%u > 129", block_idx, end, tail_len);
+        return ESP_FAIL;
+    }
 
     uint16_t record_size = fixed + tail_len + sizeof(frame->checksum) + sizeof(tail_len) + sizeof(magic);
-    if (record_size > end) return ESP_FAIL; // 二次校验
+    if (record_size > end) {
+        ESP_LOGD("FLASH", "bkrd blk=%u end=%u record_size=%u > end", block_idx, end, record_size);
+        return ESP_FAIL;
+    }
 
     uint32_t start = end - record_size;
 
-    // 正向读取这一条记录
     uint32_t dummy;
     err = read_forward_single_block(block_idx, start, frame, &dummy);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) {
+        ESP_LOGD("FLASH", "bkrd blk=%u start=%u forward failed %d", block_idx, start, err);
+        return err;
+    }
 
-    // 更新 offset 为上一条记录的末尾（即当前记录的起始位置）
     *offset = start; 
+    ESP_LOGI("FLASH", "bkrd OK blk=%u end=%u -> start=%u (seq=0x%02X self=0x%02X)", block_idx, end, start, frame->seq, frame->self_id);
     return ESP_OK;
 }
 
@@ -549,8 +579,13 @@ esp_err_t chat_storage_read_next(chat_cursor_t *cursor, LoRaFrameData *frame)
             return ESP_OK;
         }
         
-        // 如果读取失败（数据损坏），跳过当前记录？或者直接终止？
-        // 这里选择终止，防止死循环
+        // 当前块读失败（空白/损坏），如果还没试过 active 块则切过去
+        if (cursor->stage == 0) {
+            cursor->stage = 1;
+            cursor->physical_block = g_meta.active_block;
+            cursor->offset = 0;
+            continue;
+        }
         return err; 
     }
 }
@@ -570,29 +605,20 @@ esp_err_t chat_storage_read_prev(chat_cursor_t *cursor, LoRaFrameData *frame)
     esp_err_t err;
 
     while (1) {
-        // 尝试在当前块反向读取
+        ESP_LOGI("FLASH", "read_prev stage=%u blk=%u offset=%lu",
+                 cursor->stage, cursor->physical_block, (unsigned long)cursor->offset);
         err = read_backward_single_block(cursor->physical_block, &cursor->offset, frame);
-        
-        if (err == ESP_OK) {
-            return ESP_OK; // 成功读到一条
-        }
+        if (err == ESP_OK) return ESP_OK;
 
-        // 如果当前块读到了尽头 (ESP_ERR_NOT_FOUND)
-        if (err == ESP_ERR_NOT_FOUND) {
-            if (cursor->stage == 0) {
-                // 切换到第二个块 (Inactive 块，旧数据)
-                cursor->stage = 1;
-                cursor->physical_block = 1 - g_meta.active_block;
-                cursor->offset = CHAT_BLOCK_SIZE; // Inactive 块是满的，从末尾开始
-                continue; // 继续尝试读取
-            } else {
-                // 两个块都读完了
-                return ESP_ERR_NOT_FOUND;
-            }
+        if (cursor->stage == 0) {
+            ESP_LOGI("FLASH", "read_prev stage0 fail -> switch to blk=%u", 1 - g_meta.active_block);
+            cursor->stage = 1;
+            cursor->physical_block = 1 - g_meta.active_block;
+            cursor->offset = CHAT_BLOCK_SIZE;
+            continue;
         }
-
-        // 其他错误（如数据损坏）
-        return err;
+        ESP_LOGI("FLASH", "read_prev stage1 fail -> stop");
+        return ESP_ERR_NOT_FOUND;
     }
 }
 
@@ -601,20 +627,17 @@ void update_chat_list_last_time(void)
     chat_cursor_t cursor;
     LoRaFrameData frame;
     
-    // 初始化正向游标（从最旧到最新）
     chat_read_forward_init(&cursor);
     
-    // 遍历所有消息
     while (chat_storage_read_next(&cursor, &frame) == ESP_OK) {
+        uint32_t t = pack_frame_time(&frame);
         uint8_t id = frame.self_id;
-        if (chat_list[id].id != 0xFF) {
-            uint32_t current_time = pack_frame_time(&frame);
-            
-            // 因为是从旧到新遍历，所以直接覆盖即可，最后留下的就是最新的
-            // 如果 chat_list 是未初始化的，记得先判断或初始化 last_time 为 0
-            if (current_time > chat_list[id].last_time) {
-                chat_list[id].last_time = current_time;
-            }
+        if (t > chat_list[id].last_time) {
+            chat_list[id].last_time = t;
+        }
+        id = frame.target_id;
+        if (id != 0xFF && t > chat_list[id].last_time) {
+            chat_list[id].last_time = t;
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }

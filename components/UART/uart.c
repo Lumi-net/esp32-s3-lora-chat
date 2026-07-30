@@ -3,10 +3,14 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include <string.h>
+#include <inttypes.h>
 #include <sys/time.h>
 #include "va.h"
 #include "types.h"
+
+
 
 #define LORA_MD0 GPIO_NUM_47
 #define LORA_MD1 GPIO_NUM_48
@@ -183,8 +187,8 @@ ParseStatus parseLoRaFrame(const uint8_t* buf, uint8_t buf_len, LoRaFrameData* o
     uint8_t expected_len = 10 + data_len + 1;
     if (buf_len != expected_len) return PARSE_ERR_LEN; // 长度不匹配
 
-    // 校验 CRC8
-    uint8_t calc_crc = calculateCRC8(&buf[2], 10 + data_len);
+    // 校验 CRC8 (从 seq 到 data 末尾, 共 8 + data_len 字节)
+    uint8_t calc_crc = calculateCRC8(&buf[2], 8 + data_len);
     if (calc_crc != buf[10 + data_len]) return PARSE_ERR_CRC;
 
     // 填充结构体
@@ -234,26 +238,28 @@ void send_ack(uint8_t original_seq, uint8_t original_sender_id) {
     gettimeofday(&tv, NULL);
     struct tm *timeinfo = localtime(&tv.tv_sec);
     if (timeinfo->tm_year >= (2024 - 1900)) {
-        ack_buf[5] = timeinfo->tm_mon + 1;   // tm_mon 范围是 0-11，需要 +1
-        ack_buf[6] = timeinfo->tm_mday;        // tm_mday 范围是 1-31
-        ack_buf[7] = timeinfo->tm_hour;       // tm_hour 范围是 0-23
-        ack_buf[8] = timeinfo->tm_min;      // tm_min 范围是 0-59
+        ack_buf[8] = timeinfo->tm_mon + 1;   // tm_mon 范围是 0-11，需要 +1
+        ack_buf[9] = timeinfo->tm_mday;        // tm_mday 范围是 1-31
+        ack_buf[10] = timeinfo->tm_hour;       // tm_hour 范围是 0-23
+        ack_buf[11] = timeinfo->tm_min;      // tm_min 范围是 0-59
     } else {
         // 刚开机? 时间默认是 1970 年，这里填 0
-        ack_buf[5] = 0;
-        ack_buf[6] = 0;
-        ack_buf[7] = 0;
         ack_buf[8] = 0;
+        ack_buf[9] = 0;
+        ack_buf[10] = 0;
+        ack_buf[11] = 0;
         ESP_LOGW("APP", "RTC time not synced yet, sending 00:00");
     }
 
     ack_buf[12] = 0; // 数据长度为 0 表示 ACK
     
-    // 3. CRC8 校验 (计算范围同数据帧，从 seq 开始的 8 字节)
+    // 3. CRC8 校验 (从 seq 到 data_len 共 8 字节)
     uint8_t crc = calculateCRC8(&ack_buf[5], 8);
     ack_buf[13] = crc;
     
     uart_transmit(ack_buf, 14);
+
+    ESP_LOGI("UART", "TX ACK -> 0x%02X  seq=0x%02X", original_sender_id, original_seq);
 
     lora_sleep();
 }
@@ -276,10 +282,17 @@ void uart_parse_byte(uint8_t ch)
                 rx_buf[1] = ch;
                 rx_idx = 2;
                 rx_state = RX_RECEIVE_HEADER;
+                lora_status = LORA_STATUS_RECEIVING;
+                ESP_LOGI("UART", "RX hdr AA 55 detected");
             }
             else
             {
-                rx_state = RX_WAIT_AA;
+                if (ch == 0xAA) {
+                    rx_buf[0] = 0xAA;
+                    rx_idx = 1;
+                } else {
+                    rx_state = RX_WAIT_AA;
+                }
             }
             break;
         case RX_RECEIVE_HEADER:
@@ -315,11 +328,15 @@ void uart_parse_byte(uint8_t ch)
                 if(ret == PARSE_OK)
                 {
                     // 判断帧类型：data_len > 0 为数据帧，data_len == 0 为 ACK 帧
+                    ESP_LOGI("UART", "RX frame OK  seq=0x%02X from=0x%02X to=0x%02X len=%d",
+                             frame_data.seq, frame_data.self_id, frame_data.target_id, frame_data.data_len);
                     if (frame_data.data_len > 0) 
                     {
                         // 数据帧：判断 target_id 是否为自己 (如果是广播 target_id=0xFF，可根据需求修改判断条件)
                         if (frame_data.target_id == self_id) 
                         {
+                            ESP_LOGI("UART", "RX DATA <- 0x%02X  seq=0x%02X  len=%d  \"%s\"",
+                                     frame_data.self_id, frame_data.seq, frame_data.data_len, frame_data.data_str);
                             // 发送 ACK 给原发送方
                             send_ack(frame_data.seq, frame_data.self_id); // 此处self_id即对方发来的自己的ID，ACK中为接收方ID
                         }
@@ -334,12 +351,19 @@ void uart_parse_byte(uint8_t ch)
                         // ACK 帧：判断 target_id 是否为自己 (确保是回复给自己的 ACK)
                         if (frame_data.target_id == self_id) 
                         {
+                            ESP_LOGI("UART", "RX ACK <- 0x%02X  seq=0x%02X",
+                                     frame_data.self_id, frame_data.seq);
                             UIEvent event;
                             event.type = EVENT_UART; // 复用 EVENT_UART，应用层通过 data_len == 0 区分
                             event.frame = frame_data;
                             xQueueSend(appQueue, &event, 0);
                         }
                     }
+                } else {
+                    ESP_LOGI("UART", "RX frame PARSE FAIL (%d)  raw hex:",
+                             ret);
+                    ESP_LOG_BUFFER_HEX("UART", rx_buf, target_len);
+                    lora_status = LORA_STATUS_IDLE;
                 }
                 rx_state = RX_WAIT_AA;
                 rx_idx = 0;
@@ -375,19 +399,45 @@ void send_lora_packet(uint8_t target_id, const uint8_t* frame_buf, uint8_t frame
     
     lora_wake(); // 发送前唤醒模块
     uart_transmit(tx_buf, 3 + frame_len);
+    ESP_LOGI("UART", "TX pkt -> 0x%02X  seq=0x%02X  len=%d  \"%.*s\"",
+             target_id, frame_buf[2], frame_buf[9], frame_buf[9], &frame_buf[10]);
     lora_sleep();
 }
 
-void heartbeat_task(void *arg) {
-    while(1) {
-        // 每隔 180~240 秒随机时间广播一次
-        uint32_t delay_s = 180 + (esp_random() % 60);
-        vTaskDelay(pdMS_TO_TICKS(delay_s * 1000));
-        
-        // 构建心跳帧 (target_id=0xFF, data="HB")
-        uint8_t frame_buf[131];
-        uint8_t frame_len = buildLoRaFrame(frame_buf, self_id, 0xFF, "HB");
-        
-        send_lora_packet(0xFF, frame_buf, frame_len);
+static esp_timer_handle_t hb_timer = NULL;
+static uint64_t next_hb_deadline_us = 0;
+
+static void heartbeat_tick(void *arg) {
+    uint8_t frame_buf[131];
+    uint8_t frame_len = buildLoRaFrame(frame_buf, self_id, 0xFF, "HB");
+    send_lora_packet(0xFF, frame_buf, frame_len);
+
+    uint32_t interval_s = 180 + (esp_random() % 60);
+    next_hb_deadline_us = esp_timer_get_time() + (uint64_t)interval_s * 1000000ULL;
+    esp_timer_start_once(hb_timer, interval_s * 1000000ULL);
+}
+
+void heartbeat_init(void) {
+    esp_timer_create_args_t hb_args = {
+        .callback = heartbeat_tick,
+        .name = "hb_timer"
+    };
+    esp_timer_create(&hb_args, &hb_timer);
+
+    uint32_t interval_s = 180 + (esp_random() % 60);
+    next_hb_deadline_us = esp_timer_get_time() + (uint64_t)interval_s * 1000000ULL;
+    esp_timer_start_once(hb_timer, interval_s * 1000000ULL);
+
+    ESP_LOGI("UART", "Heartbeat initialized, first in %" PRIu32 " s", interval_s);
+}
+
+uint64_t heartbeat_get_next_deadline_us(void) {
+    uint64_t now = esp_timer_get_time();
+    if (next_hb_deadline_us <= now) {
+        uint32_t interval_s = 180 + (esp_random() % 60);
+        next_hb_deadline_us = now + (uint64_t)interval_s * 1000000ULL;
+        esp_timer_stop(hb_timer);
+        esp_timer_start_once(hb_timer, interval_s * 1000000ULL);
     }
+    return next_hb_deadline_us;
 }

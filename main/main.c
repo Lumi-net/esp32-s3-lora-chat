@@ -9,6 +9,9 @@
 #include "esp_log.h"
 #include "pwm.h"
 #include "spi.h"
+#include "freertos/semphr.h"
+
+static SemaphoreHandle_t lvgl_mutex = NULL;
 #include "uart.h"
 #include "lcd.h"
 #include "ui.h"
@@ -45,6 +48,12 @@ static void update_boot_label_cb(void *arg) {
     }
 }
 
+static void async_boot_label(const char *text) {
+    if (lvgl_mutex) xSemaphoreTakeRecursive(lvgl_mutex, portMAX_DELAY);
+    lv_async_call(update_boot_label_cb, (void *)text);
+    if (lvgl_mutex) xSemaphoreGiveRecursive(lvgl_mutex);
+}
+
 static void lvgl_tick_cb(void *arg)
 {
     lv_tick_inc(1);
@@ -57,7 +66,6 @@ void app_main_task(void *arg)
     bool is_initialized = false;
     WifiProvisioningState current_wifi_state = WIFI_STATE_IDLE;
     int64_t quick_sleep_deadline_us = 0; 
-    bool just_woken_up_by_aux = false;
     uint32_t last_battery_check_time = 0;
     uint32_t last_time_check_time = 0;
     uint32_t last_mem_check_time = 0;
@@ -89,7 +97,7 @@ void app_main_task(void *arg)
                 ESP_LOGI("APP", "IC!5");
                 xTaskCreatePinnedToCore(scanKeyTask, "scan_key", 2048, NULL, 5, NULL, 0);
                 xTaskCreatePinnedToCore(uart_receive, "uart_receive", 4096, NULL, 5, NULL, 0);
-                xTaskCreatePinnedToCore(heartbeat_task, "heartbeat", 4096, NULL, 5, NULL, 0);
+                heartbeat_init();
             }
         }
 
@@ -144,8 +152,6 @@ void app_main_task(void *arg)
                             send_state = SEND_STATE_IDLE;
                             ack_timeout_count = 0;
                             retry_delay_end_time = 0;
-                            lora_status = LORA_STATUS_RECEIVING;
-                            update_lora_status_indicator();
 
                             // 写Flash
                             LoRaFrameData msg_frame = {0};
@@ -180,6 +186,15 @@ void app_main_task(void *arg)
                                 offsetof(LoRaFrameData, data_str) + msg_frame.data_len
                             );
 
+                            uint32_t sent_packed = (uint32_t)msg_frame.month * 1000000 +
+                                                    (uint32_t)msg_frame.day * 10000 +
+                                                    (uint32_t)msg_frame.hour * 100 +
+                                                    (uint32_t)msg_frame.minute;
+                            if (sent_packed > chat_list[pending_target_id].last_time) {
+                                chat_list[pending_target_id].last_time = sent_packed;
+                                if (current_page_id == PAGE_MENU) menu_refresh();
+                            }
+
                             esp_err_t err = chat_storage_append(&msg_frame);
                             if (err != ESP_OK) {
                                 ESP_LOGE("FLASH", "Save chat failed: %s", esp_err_to_name(err));
@@ -197,33 +212,37 @@ void app_main_task(void *arg)
                             ui_chat_append_new_message(&msg_frame);
                             lora_status = LORA_STATUS_IDLE;
                             update_lora_status_indicator();
+                        } else {
+                            lora_status = LORA_STATUS_IDLE;
+                            update_lora_status_indicator();
                         }
                     }
                     else
                     {
-                        lora_status = LORA_STATUS_RECEIVING;
-                        update_lora_status_indicator();
                         if (event.frame.target_id == 0xFF && event.frame.data_len >= 2 && strncmp(event.frame.data_str, "HB", 2) == 0) // 收到心跳
                         {
                             // 收到心跳广播：更新时间戳
-                            struct timeval tv;
-                            gettimeofday(&tv, NULL);
-                            struct tm *timeinfo = localtime(&tv.tv_sec);
-
-                            uint8_t cur_month = 0, cur_day = 0, cur_hour = 0, cur_minute = 0;
-                            if (timeinfo->tm_year >= (2024 - 1900)) {
-                                cur_month = timeinfo->tm_mon + 1;
-                                cur_day = timeinfo->tm_mday;
-                                cur_hour = timeinfo->tm_hour;
-                                cur_minute = timeinfo->tm_min;
-                            }
-                            
                             if (event.frame.self_id != self_id) {
-                                chat_list[event.frame.self_id].last_online = cur_month * 1000000 + 
-                                                                            cur_day * 10000 + 
-                                                                            cur_hour * 100 + 
-                                                                            cur_minute;
+                                struct timeval tv;
+                                gettimeofday(&tv, NULL);
+                                struct tm *timeinfo = localtime(&tv.tv_sec);
+                                if (timeinfo->tm_year >= (2024 - 1900)) {
+                                    chat_list[event.frame.self_id].last_online =
+                                        (uint32_t)(timeinfo->tm_mon + 1) * 1000000 +
+                                        (uint32_t)timeinfo->tm_mday * 10000 +
+                                        (uint32_t)timeinfo->tm_hour * 100 +
+                                        (uint32_t)timeinfo->tm_min;
+                                } else {
+                                    chat_list[event.frame.self_id].last_online =
+                                        (uint32_t)event.frame.month * 1000000 +
+                                        (uint32_t)event.frame.day * 10000 +
+                                        (uint32_t)event.frame.hour * 100 +
+                                        (uint32_t)event.frame.minute;
+                                }
+                                if (current_page_id == PAGE_MENU) menu_refresh();
                             }
+                            lora_status = LORA_STATUS_IDLE;
+                            update_lora_status_indicator();
                         }
                         else { // 收到消息 UART收到消息会先发ACK再传队列 这里不需要发了
                             if (event.frame.data_len > 0 && seen_peer[event.frame.self_id] && last_seen_seq[event.frame.self_id] == event.frame.seq) {
@@ -231,6 +250,30 @@ void app_main_task(void *arg)
                             } else {
                                 seen_peer[event.frame.self_id] = true;
                                 last_seen_seq[event.frame.self_id] = event.frame.seq;
+                                uint32_t packed = (uint32_t)event.frame.month * 1000000 +
+                                                  (uint32_t)event.frame.day * 10000 +
+                                                  (uint32_t)event.frame.hour * 100 +
+                                                  (uint32_t)event.frame.minute;
+                                if (packed > chat_list[event.frame.self_id].last_time) {
+                                    chat_list[event.frame.self_id].last_time = packed;
+                                    if (current_page_id == PAGE_MENU) menu_refresh();
+                                }
+                                struct timeval tv_now;
+                                gettimeofday(&tv_now, NULL);
+                                struct tm *tm_now = localtime(&tv_now.tv_sec);
+                                if (tm_now->tm_year >= (2024 - 1900)) {
+                                    chat_list[event.frame.self_id].last_online =
+                                        (uint32_t)(tm_now->tm_mon + 1) * 1000000 +
+                                        (uint32_t)tm_now->tm_mday * 10000 +
+                                        (uint32_t)tm_now->tm_hour * 100 +
+                                        (uint32_t)tm_now->tm_min;
+                                } else {
+                                    chat_list[event.frame.self_id].last_online =
+                                        (uint32_t)event.frame.month * 1000000 +
+                                        (uint32_t)event.frame.day * 10000 +
+                                        (uint32_t)event.frame.hour * 100 +
+                                        (uint32_t)event.frame.minute;
+                                }
                             esp_err_t err = chat_storage_append(&event.frame);
                             if (err != ESP_OK) {
                                 ESP_LOGE("FLASH", "Save chat failed: %s", esp_err_to_name(err));
@@ -249,13 +292,7 @@ void app_main_task(void *arg)
                             }
                         }
                     }
-                    if (just_woken_up_by_aux) {
-                        quick_sleep_deadline_us = esp_timer_get_time() + 2000000; // 覆盖之前的 500ms 保底时间
-                        just_woken_up_by_aux = false; // 消费标志
-                        ESP_LOGI("APP", "UART processed after AUX wakeup, will quick sleep in 2000ms.");
-                    }
-                }
-                else if (event.type == EVENT_KEY)
+                } else if (event.type == EVENT_KEY)
                 {
                     key = event.key;
                     switch(key)
@@ -338,6 +375,10 @@ void app_main_task(void *arg)
                                     break;
                                 case 9: // BACK
                                     if (current_page_id ==  PAGE_SETTINGS_DETAIL) {
+                                        lv_textarea_set_placeholder_text(g_ta, "Please Input...");
+                                        input_remaining_chars = 120;
+                                        lv_label_set_text_fmt(input_cnt_left, "%d", input_remaining_chars);
+                                        lv_textarea_set_text(g_ta, "");
                                         ui_show_settings_page();
                                     }
                                     break;
@@ -356,7 +397,7 @@ void app_main_task(void *arg)
                                     } else if (current_page_id == PAGE_SETTINGS) {
                                         settings_up();
                                     } else if (current_page_id == PAGE_CHAT) {
-                                        lv_obj_scroll_by(g_chat_scroll_container, 0,
+                                        lv_obj_scroll_by_bounded(g_chat_scroll_container, 0,
                                             -(lv_obj_get_height(g_chat_scroll_container) - 10), LV_ANIM_ON);
                                     }
                                     break;
@@ -366,7 +407,7 @@ void app_main_task(void *arg)
                                     } else if (current_page_id == PAGE_SETTINGS) {
                                         settings_down();
                                     } else if (current_page_id == PAGE_CHAT) {
-                                        lv_obj_scroll_by(g_chat_scroll_container, 0,
+                                        lv_obj_scroll_by_bounded(g_chat_scroll_container, 0,
                                             lv_obj_get_height(g_chat_scroll_container) - 10, LV_ANIM_ON);
                                     }
                                     break; 
@@ -386,7 +427,7 @@ void app_main_task(void *arg)
                 } 
             }
 
-            if (true) {
+            {
                 if (current_wifi_state == WIFI_STATE_AP_RUNNING) {
                     // 非阻塞检查网页端是否已提交配置
                     if (wifi_check_ap_config_done()) {
@@ -433,21 +474,21 @@ void app_main_task(void *arg)
                         
                         if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "Complete!");
                         current_wifi_state = WIFI_STATE_CONNECTED;
-                        
-                        // 1.5秒后自动返回设置主页
-                        static uint32_t complete_time = 0;
-                        if (complete_time == 0) complete_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
-                        
-                        if ((xTaskGetTickCount() * portTICK_PERIOD_MS) - complete_time >= 1500) {
-                            complete_time = 0;
-                            current_wifi_state = WIFI_STATE_IDLE;
-                            ui_show_settings_page(); 
-                        }
                     }
                     else if ((xTaskGetTickCount() - sntp_start_time) > pdMS_TO_TICKS(15000)) {
                         lv_label_set_text(detail_title_label, "Time Sync Failed!");
                         wifi_time_close();
                         current_wifi_state = WIFI_STATE_IDLE;
+                    }
+                }
+                else if (current_wifi_state == WIFI_STATE_CONNECTED) {
+                    static uint32_t complete_time = 0;
+                    if (complete_time == 0) complete_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                    
+                    if ((xTaskGetTickCount() * portTICK_PERIOD_MS) - complete_time >= 1500) {
+                        complete_time = 0;
+                        current_wifi_state = WIFI_STATE_IDLE;
+                        ui_show_settings_page(); 
                     }
                 }
             }
@@ -474,10 +515,11 @@ void app_main_task(void *arg)
                 }
 
                 if (is_system_idle && should_sleep) {
-                    int wakeup_src = enter_light_sleep();
-                    if (wakeup_src == 2) {
-                        just_woken_up_by_aux = true; 
-                        // 【保底】如果 AUX 误唤醒，5000ms 内没收到 UART 数据，也强制睡觉
+                    uint64_t hb_deadline = heartbeat_get_next_deadline_us();
+                    uint64_t now_us = esp_timer_get_time();
+                    uint64_t timer_us = (hb_deadline > now_us) ? (hb_deadline - now_us) : 0;
+                    int wakeup_src = enter_light_sleep(timer_us);
+                    if (wakeup_src == 2 || wakeup_src == 3) {
                         quick_sleep_deadline_us = esp_timer_get_time() + 5000000;
                     }
                 }
@@ -545,23 +587,25 @@ void app_main_task(void *arg)
                 }
             }
         }
+        if (lvgl_mutex) xSemaphoreTakeRecursive(lvgl_mutex, portMAX_DELAY);
         update_lora_status_indicator();
         lv_timer_handler();
+        if (lvgl_mutex) xSemaphoreGiveRecursive(lvgl_mutex);
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 
 void peripheral_init_task(void *arg)
 {
-    lv_async_call(update_boot_label_cb, "Initializing Keyboard...");
+    async_boot_label("Initializing Keyboard...");
     key_init();
     ESP_LOGI("KEY", "Initialized Keyboard...");
     vTaskDelay(pdMS_TO_TICKS(50));
-    lv_async_call(update_boot_label_cb, "Initializing UART...");
+    async_boot_label("Initializing UART...");
     uart_init();
     ESP_LOGI("UART", "Initialized UART...");
     vTaskDelay(pdMS_TO_TICKS(50));
-    lv_async_call(update_boot_label_cb, "Initializing Flash...");
+    async_boot_label("Initializing Flash...");
     ext_flash_init();
     ESP_LOGI("FLASH", "Initialized Flash...");
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -569,11 +613,11 @@ void peripheral_init_task(void *arg)
     // i2c_master_init();
     // ESP_LOGI("I2C", "Initialized I2C...");
     vTaskDelay(pdMS_TO_TICKS(50));
-    lv_async_call(update_boot_label_cb, "Initializing NVS...");
+    async_boot_label("Initializing NVS...");
     nvs_init();
     ESP_LOGI("NVS", "Initialized NVS...");
     vTaskDelay(pdMS_TO_TICKS(50));
-    lv_async_call(update_boot_label_cb, "Reading NVS...");
+    async_boot_label("Reading NVS...");
     nvs_read_all_alias_to_list(); // 先读alias让chat_list里面的id被填上
     ESP_LOGI("NVS", "Reading NVS...");
     nvs_read_all_user_color_to_list();
@@ -585,14 +629,14 @@ void peripheral_init_task(void *arg)
     nvs_read_brightness();
     ESP_LOGI("NVS", "Reading NVS...");
     nvs_read_status_title();
-    ESP_LOGI("NVS", "Reading NVS...");
+    nvs_dump_all();
     vTaskDelay(pdMS_TO_TICKS(50));
-    lv_async_call(update_boot_label_cb, "Restoring Flash Offset...");
+    async_boot_label("Restoring Flash Offset...");
     uint32_t valid_len = chat_storage_scan();
     g_write_offset = valid_len;
     ESP_LOGI("FLASH", "Restoring Flash Offset...");
     vTaskDelay(pdMS_TO_TICKS(50));
-    lv_async_call(update_boot_label_cb, "Updating Latest Message Time...");
+    async_boot_label("Updating Latest Message Time...");
     update_chat_list_last_time();
     ESP_LOGI("FLASH", "Updating Latest Message Time...");
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -608,6 +652,7 @@ void app_main(void)
 {
     appQueue = xQueueCreate(10, sizeof(UIEvent));
     init_event_group = xEventGroupCreate();
+    lvgl_mutex = xSemaphoreCreateRecursiveMutex();
 
     // 初始化显示外设
     pwm_init();

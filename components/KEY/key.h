@@ -14,5 +14,6 @@ void key_init(void);
 uint8_t scanKey();
 void scanKeyTask(void *arg);
 void key_set_locked(bool state);
+void key_set_shifted(bool state);
 
 #endif

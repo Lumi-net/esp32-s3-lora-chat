@@ -34,6 +34,7 @@ void ui_show_settings_page(void);
 void show_toast_dialog(const char *msg, uint32_t auto_close_ms);
 void ui_show_settings_detail_page(void);
 void handle_settings_detail_enter(void);
+void menu_refresh(void);
 void menu_up(void);
 void menu_down(void);
 void settings_up(void);

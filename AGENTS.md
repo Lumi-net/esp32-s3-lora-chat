@@ -15,6 +15,8 @@ idf.py -p PORT flash monitor
 - Flash size: 16MB (QIO 80MHz)
 - Partition: custom `partitions_user.csv` (factory app at 0x10000, 4MB)
 
+As a AI agent, you shouldn't try to build and flash, because there isn't idf.py in the AI environment.
+
 ## Project Map
 
 All source is in `main/main.c` + 12 local components under `components/`.

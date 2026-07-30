@@ -251,7 +251,7 @@ void nvs_read_all_user_color_to_list(void) {
     // 注意：这里只判断 id != 0xFF，绝对不要重置 chat_list[i].id = 0xFF，否则会覆盖 alias 数据！
     for (int i = 0; i < 256; i++) {
         if (chat_list[i].id != 0xFF) {
-            chat_list[i].color = 0x000000; 
+            chat_list[i].color = 0xFFFFFF; 
         }
     }
 
@@ -432,6 +432,47 @@ esp_err_t nvs_set_status_title(const char *title) {
     return err;
 }
 
+void nvs_dump_all(void) {
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS for dump");
+        return;
+    }
+    ESP_LOGI(TAG, "=== NVS dump start ===");
+    nvs_iterator_t it = NULL;
+    esp_err_t err = nvs_entry_find("nvs", NVS_NAMESPACE, NVS_TYPE_ANY, &it);
+    if (err != ESP_OK) {
+        ESP_LOGI(TAG, "(empty)");
+    }
+    int count = 0;
+    while (it != NULL) {
+        nvs_entry_info_t info;
+        nvs_entry_info(it, &info);
+        if (info.type == NVS_TYPE_STR) {
+            char buf[64] = {0};
+            size_t len = sizeof(buf);
+            if (nvs_get_str(handle, info.key, buf, &len) == ESP_OK) {
+                ESP_LOGI(TAG, "  [%s] = \"%s\" (str)", info.key, buf);
+            }
+        } else if (info.type == NVS_TYPE_U16) {
+            uint16_t val = 0;
+            if (nvs_get_u16(handle, info.key, &val) == ESP_OK) {
+                ESP_LOGI(TAG, "  [%s] = %u (u16)", info.key, val);
+            }
+        } else if (info.type == NVS_TYPE_U32) {
+            uint32_t val = 0;
+            if (nvs_get_u32(handle, info.key, &val) == ESP_OK) {
+                ESP_LOGI(TAG, "  [%s] = 0x%08lX (%lu) (u32)", info.key, val, val);
+            }
+        }
+        count++;
+        nvs_entry_next(&it);
+    }
+    nvs_release_iterator(it);
+    ESP_LOGI(TAG, "=== NVS dump end (%d entries) ===", count);
+    nvs_close(handle);
+}
+
 void nvs_read_status_title(void) {
     nvs_handle_t handle;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
@@ -450,4 +491,12 @@ void nvs_read_status_title(void) {
     }
 
     nvs_close(handle);
+}
+
+esp_err_t nvs_erase_all_partition(void) {
+    esp_err_t ret = nvs_flash_erase();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_flash_erase failed: %s", esp_err_to_name(ret));
+    }
+    return ret;
 }

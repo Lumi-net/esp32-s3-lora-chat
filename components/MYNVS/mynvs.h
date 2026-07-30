@@ -14,3 +14,5 @@ void nvs_read_sleep_time(void);
 void nvs_read_brightness(void);
 esp_err_t nvs_set_status_title(const char *title);
 void nvs_read_status_title(void);
+void nvs_dump_all(void);
+esp_err_t nvs_erase_all_partition(void);

@@ -36,10 +36,14 @@ bool check_and_enter_sleep(void)
 /**
  * @brief 配置睡眠唤醒源 (使用 EXT0 和 EXT1)
  */
-static void configure_wakeup_sources(void)
+static void configure_wakeup_sources(uint64_t timer_wakeup_us)
 {
-    // ==========================================
-    // 0. 键盘行引脚设为 RTC GPIO 输出低电平
+    // 0. 配置定时器唤醒
+    if (timer_wakeup_us > 0) {
+        esp_sleep_enable_timer_wakeup(timer_wakeup_us);
+    }
+
+    // 1. 键盘行引脚设为 RTC GPIO 输出低电平
     // 使用 RTC GPIO 而非数字 GPIO，确保 sleep 期间电平保持
     // 同时关闭上拉，避免 NMOS 对抗上拉电阻浪费电流 (~73µA/脚)
     // 这样按键按下时，行→列导通，列引脚被拉低触发 EXT1
@@ -98,9 +102,10 @@ static bool check_wakeup_pins_idle(void) {
 
 /**
  * @brief 进入 Light-sleep 并处理唤醒后的逻辑
- * @return 1 如果是键盘唤醒, 2 如果是 AUX 唤醒, 0 如果是其他/未知唤醒
+ * @param timer_wakeup_us 定时器唤醒的微秒间隔, 0 表示不设定时器
+ * @return 1 如果是键盘唤醒, 2 如果是 AUX 唤醒, 3 如果是定时器唤醒, 0 如果是其他/未知唤醒
  */
-int enter_light_sleep(void)
+int enter_light_sleep(uint64_t timer_wakeup_us)
 {
     int wakeup_source = 0;
     ESP_LOGI("POWER", "No activity for %u s. Entering Light Sleep...", auto_sleep_timeout);
@@ -109,7 +114,7 @@ int enter_light_sleep(void)
     duty_set(0);
 
     // 2. 配置唤醒源
-    configure_wakeup_sources();
+    configure_wakeup_sources(timer_wakeup_us);
 
     if (!check_wakeup_pins_idle()) {
         // 恢复背光并返回，不进入睡眠
@@ -177,6 +182,10 @@ int enter_light_sleep(void)
         ESP_LOGI("POWER", ">>> Wakeup Source: Matrix Keypad via EXT1");
         wakeup_source = 1;
     } 
+    else if (cause == ESP_SLEEP_WAKEUP_TIMER) {
+        ESP_LOGI("POWER", ">>> Wakeup Source: Timer (Heartbeat)");
+        wakeup_source = 3;
+    }
     else {
         ESP_LOGI("POWER", ">>> Wakeup Source: Other (Cause: %d)", cause);
     }

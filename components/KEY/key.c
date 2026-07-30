@@ -151,6 +151,7 @@ uint8_t scanKey() {
                         choose = 20; // state change
                     } else {
                         if (shifted) {
+                            shifted = false;
                             locked = !locked;
                             choose = 19; // LOCK_TOGGLE sentinel
                         } else {
@@ -169,6 +170,11 @@ uint8_t scanKey() {
 
 void key_set_locked(bool state) {
     locked = state;
+    shifted = false;
+}
+
+void key_set_shifted(bool state) {
+    shifted = state;
 }
 
 void scanKeyTask(void *arg) {
