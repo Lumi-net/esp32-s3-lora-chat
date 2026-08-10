@@ -26,6 +26,8 @@ esp_err_t nvs_init(void) {
 }
 
 esp_err_t nvs_set_alias(uint8_t id, const char *alias) {
+    if (id == 0x00) return ESP_OK; // ALL 条目不可修改
+
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
@@ -83,7 +85,8 @@ esp_err_t nvs_set_alias(uint8_t id, const char *alias) {
     return err;
 }
 
-esp_err_t nvs_set_user_color(uint8_t id, uint32_t color) { // 不可以删除 如果不想要了就随机生成一个 和开始一样
+esp_err_t nvs_set_user_color(uint8_t id, uint32_t color) {
+    if (id == 0x00) return ESP_OK; // ALL 条目不可修改
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
@@ -242,8 +245,16 @@ void nvs_read_all_alias_to_list(void) {
     
     ESP_LOGI(TAG, "--- Total alias found: %d items ---", count);
     
-    nvs_release_iterator(it); // 释放迭代器
+    nvs_release_iterator(it);
     nvs_close(handle);
+
+    // 注入 ALL 广播群组条目
+    chat_list[0x00].id = 0x00;
+    strncpy(chat_list[0x00].alias, "ALL", sizeof(chat_list[0x00].alias) - 1);
+    chat_list[0x00].color = 0xFFFFFF;
+    ESP_LOGI(TAG, "Injected ALL broadcast entry");
+
+    return;
 }
 
 void nvs_read_all_user_color_to_list(void) {

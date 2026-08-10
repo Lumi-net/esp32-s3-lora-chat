@@ -506,10 +506,14 @@ static void append_message_ui(lv_obj_t *container, LoRaFrameData *frame, char *l
 
     // 4. 消息内容 (Spangroup: alias 带颜色 + text 白色, 同一文本块正确折行)
     const char *alias = "Unknown";
+    char unknown_alias[8];
     uint32_t acolor = 0xFFFFFF;
     if (chat_list[frame->self_id].id != 0xFF && chat_list[frame->self_id].alias[0] != '\0') {
         alias = chat_list[frame->self_id].alias;
         acolor = chat_list[frame->self_id].color;
+    } else {
+        snprintf(unknown_alias, sizeof(unknown_alias), "0x%02X", frame->self_id);
+        alias = unknown_alias;
     }
     lv_obj_t *sg = lv_spangroup_create(msg_row);
     lv_spangroup_set_mode(sg, LV_SPAN_MODE_BREAK);
@@ -541,7 +545,11 @@ static void chat_scroll_load_cb(void *arg) {
 
     while (found < CHAT_LOAD_MORE_COUNT) {
         if (chat_storage_read_prev(&chat_cursor, &frames[found]) != ESP_OK) break;
-        if (frames[found].self_id == g_chat_target_id) found++;
+        if (g_chat_target_id == 0x00) {
+            if (frames[found].target_id == 0x00) found++;
+        } else {
+            if (frames[found].self_id == g_chat_target_id) found++;
+        }
     }
 
     if (found > 0) {
@@ -569,7 +577,7 @@ static void chat_scroll_cb(lv_event_t * e)
     lv_coord_t max_scroll = lv_obj_get_scroll_bottom(container);
     lv_coord_t container_height = lv_obj_get_height(container);
 
-    if (scroll_y < CHAT_SCROLL_THRESHOLD && !chat_is_loading && g_chat_target_id != 0xFF) {
+    if (scroll_y < CHAT_SCROLL_THRESHOLD && !chat_is_loading) {
         chat_is_loading = true;
         lv_async_call(chat_scroll_load_cb, container);
     }
@@ -594,9 +602,11 @@ static void chat_scroll_cb(lv_event_t * e)
  */
 void ui_chat_append_new_message(LoRaFrameData *frame)
 {
-    // 1. 判断当前是否在聊天界面，且是该联系人的消息
-    if (current_page_id != PAGE_CHAT || g_chat_target_id != frame->self_id) {
-        return; // 不在当前聊天页，不处理（或者可以在菜单页更新未读角标）
+    // 1. 判断当前是否在聊天界面，且消息匹配当前对话
+    bool msg_matches = (g_chat_target_id == 0x00) ? (frame->target_id == 0x00)
+                                                   : (g_chat_target_id == frame->self_id);
+    if (current_page_id != PAGE_CHAT || !msg_matches) {
+        return;
     }
 
     // 2. 确保容器存在
@@ -660,7 +670,11 @@ void ui_show_chat_page(uint8_t target_id)
     
     while (found < CHAT_INIT_LOAD_COUNT) {
         if (chat_storage_read_prev(&chat_cursor, &frames[found]) != ESP_OK) break;
-        if (frames[found].self_id == target_id) found++;
+        if (target_id == 0x00) {
+            if (frames[found].target_id == 0x00) found++;
+        } else {
+            if (frames[found].self_id == target_id) found++;
+        }
     }
 
     if (found > 0) {

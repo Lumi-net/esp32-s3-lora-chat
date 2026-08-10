@@ -135,7 +135,6 @@ void app_main_task(void *arg)
                     } else {
                         lora_status = LORA_STATUS_TIMEOUT;
                         update_lora_status_indicator();
-                        lv_timer_handler();
                         retry_delay_end_time = current_time + 500;
                     }
                 }
@@ -226,19 +225,22 @@ void app_main_task(void *arg)
                                 struct timeval tv;
                                 gettimeofday(&tv, NULL);
                                 struct tm *timeinfo = localtime(&tv.tv_sec);
+                                uint32_t online_packed;
                                 if (timeinfo->tm_year >= (2024 - 1900)) {
-                                    chat_list[event.frame.self_id].last_online =
+                                    online_packed =
                                         (uint32_t)(timeinfo->tm_mon + 1) * 1000000 +
                                         (uint32_t)timeinfo->tm_mday * 10000 +
                                         (uint32_t)timeinfo->tm_hour * 100 +
                                         (uint32_t)timeinfo->tm_min;
                                 } else {
-                                    chat_list[event.frame.self_id].last_online =
+                                    online_packed =
                                         (uint32_t)event.frame.month * 1000000 +
                                         (uint32_t)event.frame.day * 10000 +
                                         (uint32_t)event.frame.hour * 100 +
                                         (uint32_t)event.frame.minute;
                                 }
+                                chat_list[event.frame.self_id].last_online = online_packed;
+                                chat_list[0x00].last_online = online_packed;
                                 if (current_page_id == PAGE_MENU) menu_refresh();
                             }
                             lora_status = LORA_STATUS_IDLE;
@@ -261,18 +263,28 @@ void app_main_task(void *arg)
                                 struct timeval tv_now;
                                 gettimeofday(&tv_now, NULL);
                                 struct tm *tm_now = localtime(&tv_now.tv_sec);
+                                uint32_t online_packed;
                                 if (tm_now->tm_year >= (2024 - 1900)) {
-                                    chat_list[event.frame.self_id].last_online =
+                                    online_packed =
                                         (uint32_t)(tm_now->tm_mon + 1) * 1000000 +
                                         (uint32_t)tm_now->tm_mday * 10000 +
                                         (uint32_t)tm_now->tm_hour * 100 +
                                         (uint32_t)tm_now->tm_min;
                                 } else {
-                                    chat_list[event.frame.self_id].last_online =
+                                    online_packed =
                                         (uint32_t)event.frame.month * 1000000 +
                                         (uint32_t)event.frame.day * 10000 +
                                         (uint32_t)event.frame.hour * 100 +
                                         (uint32_t)event.frame.minute;
+                                }
+                                chat_list[event.frame.self_id].last_online = online_packed;
+
+                                // ALL 广播消息：同时更新 ALL 条目的时间
+                                if (event.frame.target_id == 0x00) {
+                                    if (packed > chat_list[0x00].last_time) {
+                                        chat_list[0x00].last_time = packed;
+                                    }
+                                    chat_list[0x00].last_online = online_packed;
                                 }
                             esp_err_t err = chat_storage_append(&event.frame);
                             if (err != ESP_OK) {
@@ -284,7 +296,8 @@ void app_main_task(void *arg)
                                 ESP_LOGI("FLASH", "Chat saved to flash, len: %d", event.frame.data_len);
                             }
                             
-                            if (g_chat_target_id == event.frame.self_id) {
+                            if (g_chat_target_id == event.frame.self_id ||
+                                (g_chat_target_id == 0x00 && event.frame.target_id == 0x00)) {
                                 ui_chat_append_new_message(&event.frame);
                             }
                             lora_status = LORA_STATUS_IDLE;
@@ -309,25 +322,55 @@ void app_main_task(void *arg)
                             break;
                         case 17: // SEND
                         {
+                            if (current_page_id != PAGE_CHAT) break;
                             if (send_state != SEND_STATE_IDLE) { // 正在等待ACK
                                 ESP_LOGW("APP", "Busy waiting for ACK, ignore send.");
                                 break; 
                             }
                             const char* payload = lv_textarea_get_text(g_ta);
                             uint8_t frame_buf[131];
+                            uint8_t lora_target = (g_chat_target_id == 0x00) ? 0xFF : g_chat_target_id;
                             uint8_t frame_len = buildLoRaFrame(frame_buf, self_id, g_chat_target_id, payload);
-                            // 之前为了输出一下帧 现在用不上了
-                            // for (int i = 0; i < frame_len; i++) {
-                            //     if (frame_buf[i] < 0x10) {
-                            //         printf("0");
-                            //     }
-                            //     printf("%02X ", frame_buf[i]);
-                            // }
-                            // printf("\n");
-                            // printf("Frame Length: %d bytes\n", frame_len);
                             lora_status = LORA_STATUS_SENDING;
                             update_lora_status_indicator();
-                            send_lora_packet(g_chat_target_id, frame_buf, frame_len);
+                            send_lora_packet(lora_target, frame_buf, frame_len);
+
+                            if (g_chat_target_id == 0x00) {
+                                // ALL 广播：fire-and-forget，立即写闪存更新UI
+                                lora_status = LORA_STATUS_IDLE;
+                                update_lora_status_indicator();
+
+                                LoRaFrameData msg_frame = {0};
+                                msg_frame.self_id = self_id;
+                                msg_frame.target_id = 0x00;
+                                struct timeval tv;
+                                gettimeofday(&tv, NULL);
+                                struct tm *timeinfo = localtime(&tv.tv_sec);
+                                if (timeinfo->tm_year >= (2024 - 1900)) {
+                                    msg_frame.month = timeinfo->tm_mon + 1;
+                                    msg_frame.day = timeinfo->tm_mday;
+                                    msg_frame.hour = timeinfo->tm_hour;
+                                    msg_frame.minute = timeinfo->tm_min;
+                                }
+                                memcpy(msg_frame.data_str, payload, strlen(payload));
+                                msg_frame.data_len = strlen(payload);
+                                chat_storage_append(&msg_frame);
+
+                                uint32_t sent_packed = (uint32_t)msg_frame.month * 1000000 +
+                                                        (uint32_t)msg_frame.day * 10000 +
+                                                        (uint32_t)msg_frame.hour * 100 +
+                                                        (uint32_t)msg_frame.minute;
+                                if (sent_packed > chat_list[0x00].last_time) {
+                                    chat_list[0x00].last_time = sent_packed;
+                                    if (current_page_id == PAGE_MENU) menu_refresh();
+                                }
+
+                                ui_chat_append_new_message(&msg_frame);
+                                lv_textarea_set_text(g_ta, "");
+                                input_remaining_chars = 120;
+                                lv_label_set_text_fmt(input_cnt_left, "%d", input_remaining_chars);
+                                break;
+                            }
 
                             pending_ack_seq = frame_buf[2]; // 从构建好的帧中提取seq
                             pending_target_id = g_chat_target_id;     // 缓存目标 ID
@@ -398,7 +441,7 @@ void app_main_task(void *arg)
                                         settings_up();
                                     } else if (current_page_id == PAGE_CHAT) {
                                         lv_obj_scroll_by_bounded(g_chat_scroll_container, 0,
-                                            -(lv_obj_get_height(g_chat_scroll_container) - 10), LV_ANIM_ON);
+                                            (lv_obj_get_height(g_chat_scroll_container) - 10), LV_ANIM_ON);
                                     }
                                     break;
                                 case 16: // PGDOWN
@@ -408,7 +451,7 @@ void app_main_task(void *arg)
                                         settings_down();
                                     } else if (current_page_id == PAGE_CHAT) {
                                         lv_obj_scroll_by_bounded(g_chat_scroll_container, 0,
-                                            lv_obj_get_height(g_chat_scroll_container) - 10, LV_ANIM_ON);
+                                            -lv_obj_get_height(g_chat_scroll_container) - 10, LV_ANIM_ON);
                                     }
                                     break; 
                             }
