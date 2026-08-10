@@ -138,6 +138,7 @@ static esp_err_t save_handler(httpd_req_t *req)
 
     // 存入NVS
     esp_err_t ret = esp_wifi_set_config(WIFI_IF_STA, &sta_cfg);
+    ESP_LOGE(TAG, "set config ret: %s", esp_err_to_name(ret));
     if (ret == ESP_OK)
     {
         if (wifi_event_group != NULL)
@@ -249,7 +250,7 @@ esp_err_t wifi_ap_start(const char *password)
     ap_config.ap.max_connection = 4;
     ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
 
-    ret = esp_wifi_set_mode(WIFI_MODE_AP);
+    ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
     if (ret != ESP_OK)
         return ret;
 
