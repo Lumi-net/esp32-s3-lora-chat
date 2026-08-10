@@ -637,10 +637,10 @@ void ui_show_chat_page(uint8_t target_id)
     chat_is_loading = false;
     g_chat_last_date[0] = '\0'; // 重置日期状态
 
-    char title_buf[32];
+    char title_buf[48];
     const char *alias = chat_list[target_id].alias;
     if (alias[0] == '\0') alias = "Unknown";
-    snprintf(title_buf, sizeof(title_buf), "Chat | %s", alias);
+    snprintf(title_buf, sizeof(title_buf), "CHAT | %s (0x%02X)", alias, target_id);
     lv_obj_t *chat_title = lv_label_create(cur_page);
     lv_label_set_text(chat_title, title_buf);
     lv_obj_set_style_text_color(chat_title, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
