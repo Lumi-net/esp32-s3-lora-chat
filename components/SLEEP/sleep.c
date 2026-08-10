@@ -128,6 +128,9 @@ int enter_light_sleep(uint64_t timer_wakeup_us)
     // LoRa UART 已安装 driver，等待发送完成
     uart_wait_tx_done(UART_NUM_1, pdMS_TO_TICKS(200));
 
+    // 3.5 抑制唤醒键：防止唤醒用的按键被当做正常输入处理
+    keyPressed = true;
+
     // 4. 进入 Light-sleep (此函数会阻塞，直到被唤醒)
     esp_err_t ret = esp_light_sleep_start();
     if (ret != ESP_OK) {
