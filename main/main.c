@@ -417,7 +417,10 @@ void app_main_task(void *arg)
                                     lv_textarea_set_cursor_pos(g_ta, LV_TEXTAREA_CURSOR_LAST);
                                     break;
                                 case 9: // BACK
-                                    if (current_page_id ==  PAGE_SETTINGS_DETAIL) {
+                                    if (current_page_id == PAGE_CHAT) {
+                                        ui_show_menu_page();
+                                    }
+                                    else if (current_page_id ==  PAGE_SETTINGS_DETAIL) {
                                         lv_textarea_set_placeholder_text(g_ta, "Please Input...");
                                         input_remaining_chars = 120;
                                         lv_label_set_text_fmt(input_cnt_left, "%d", input_remaining_chars);
@@ -474,6 +477,7 @@ void app_main_task(void *arg)
                 if (current_wifi_state == WIFI_STATE_AP_RUNNING) {
                     // 非阻塞检查网页端是否已提交配置
                     if (wifi_check_ap_config_done()) {
+                        last_activity_time_us = esp_timer_get_time(); // 别配一半网睡着了
                         ESP_LOGI("APP", "Web config received, switching to STA...");
                         
                         // 更新 UI 提示
@@ -489,6 +493,7 @@ void app_main_task(void *arg)
                 }
                 else if (current_wifi_state == WIFI_STATE_CONNECTING_STA) {
                     if (check_wifi_saved()) {
+                        last_activity_time_us = esp_timer_get_time(); // 别配一半网睡着了
                         // 尝试连接 STA (这里会阻塞最多 15 秒，但因为是刚点击配置，用户有心理准备)
                         if (wifi_time_connect(NULL, NULL)) {
                             if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "WiFi Connected!\nSyncing time...");
@@ -510,6 +515,7 @@ void app_main_task(void *arg)
                 else if (current_wifi_state == WIFI_STATE_WAITING_SNTP) {
                     // 【非阻塞轮询】检查 SNTP 回调是否已触发
                     if (wifi_sntp_is_synced()) {
+                        last_activity_time_us = esp_timer_get_time(); // 别配一半网睡着了
                         if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "Time Synced!\nClosing WiFi...");
                         
                         // 同步成功，立即关闭 WiFi 射频省电！
@@ -531,7 +537,8 @@ void app_main_task(void *arg)
                     if ((xTaskGetTickCount() * portTICK_PERIOD_MS) - complete_time >= 1500) {
                         complete_time = 0;
                         current_wifi_state = WIFI_STATE_IDLE;
-                        ui_show_settings_page(); 
+                        ui_show_settings_page();
+                        last_activity_time_us = esp_timer_get_time(); // 别配一半网睡着了
                     }
                 }
             }
