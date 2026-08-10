@@ -9,6 +9,7 @@ extern bool shifted;
 extern bool locked;
 extern bool waited_to_choose;
 extern uint8_t wait_choose;
+extern bool keyPressed;
 
 void key_init(void);
 uint8_t scanKey();

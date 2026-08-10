@@ -116,13 +116,12 @@ uint8_t scanKey() {
                         choose = 20; // state change
                     }
                     break;
-                case 4: case 8: case 12: case 16: // 候选
+                case 4: case 8: case 12: // 候选 1-3
                     if (waited_to_choose) {
                         const char (*current_table)[10];
                         if (currentKey == 4) current_table = candidate1;
                         else if (currentKey == 8) current_table = candidate2;
-                        else if (currentKey == 12) current_table = candidate3;
-                        else current_table = candidate4;
+                        else current_table = candidate3;
 
                         choose = current_table[shifted][wait_choose];
                         
@@ -134,6 +133,24 @@ uint8_t scanKey() {
                     } else {
                         waited_to_choose = false;
                         choose = 20; // state change
+                    }
+                    break;
+                case 16: // 候选 4 / SHIFT+SEND 快捷键
+                    if (waited_to_choose) {
+                        choose = candidate4[shifted][wait_choose];
+                        if (shifted) shifted = false;
+                        waited_to_choose = false;
+                    } else if (locked) {
+                        choose = 5;
+                        lockfun = 16;
+                    } else {
+                        if (shifted) {
+                            shifted = false;
+                            choose = 17; // SEND
+                        } else {
+                            waited_to_choose = false;
+                            choose = 20; // state change
+                        }
                     }
                     break;
                 case 13: // Shift
