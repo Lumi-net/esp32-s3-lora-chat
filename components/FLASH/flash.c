@@ -25,10 +25,10 @@
 #define META_MAGIC              0x5AA5
 #define CHAT_MAGIC              0xAA55
 
-#define PIN_NUM_MISO 40
+#define PIN_NUM_MISO 41
 #define PIN_NUM_MOSI 38
 #define PIN_NUM_CLK  39
-#define PIN_NUM_CS   41
+#define PIN_NUM_CS   40
 
 static esp_flash_t *s_ext_flash = NULL;
 static uint32_t s_flash_size = 0;
@@ -394,6 +394,8 @@ esp_err_t chat_switch_block(const LoRaFrameData *frame)
 
         if(err != ESP_OK)
             return err;
+
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 
     /* 临时准备新的Meta */
