@@ -114,8 +114,12 @@ def build_ack_frame(original_seq, own_id, target_id):
     buf.append(crc8(bytes(buf[2:])))
     return bytes(buf)
 
+def is_broadcast(target_id):
+    # 0x00 = ALL 广播消息, 0xFF = 广播帧(心跳等) —— 两者路由头都是 FF FF
+    return target_id in (0x00, 0xFF)
+
 def build_routing(target_id):
-    if target_id == 0xFF:
+    if is_broadcast(target_id):
         return bytes([0xFF, 0xFF, LORA_CHANNEL])
     return bytes([LORA_GROUP, target_id, LORA_CHANNEL])
 
@@ -258,10 +262,17 @@ class LoraModule:
             else:
                 print(f"     {GREY('(unexpected ACK, ignoring)')}")
         else:
-            print(f"     msg=\"{p['data_str']}\"")
-            if tid == self.self_id or tid == 0xFF:
+            # 数据帧分类：定点(回ACK) / ALL广播0x00(不回ACK) / 其他广播0xFF(如心跳, 不回ACK)
+            if p["target_id"] == self.self_id:
+                print(f"     msg=\"{p['data_str']}\"")
                 self._send_ack(p["seq"], sid)
                 print(f"     {GREEN(f'[ACK SENT]  to 0x{sid:02X}')}")
+            elif p["target_id"] == 0x00:
+                print(f"     {CYAN('[ALL]')}  msg=\"{p['data_str']}\"")
+                print(f"     {GREY('[ALL broadcast, no ACK]')}")
+            elif p["target_id"] == 0xFF:
+                kind = "HB" if p["data_str"] == "HB" else "BCAST"
+                print(f"     {YELLOW(f'[{kind}]')}  msg=\"{p['data_str']}\"")
             else:
                 print(f"     {GREY('[ignored] not for me')}")
 
@@ -286,7 +297,12 @@ class LoraModule:
         routing = build_routing(target_id)
         pkt = routing + frame
 
-        target_str = f"0x{target_id:02X}" if target_id != 0xFF else "BROADCAST"
+        if target_id == 0x00:
+            target_str = "ALL"
+        elif target_id == 0xFF:
+            target_str = "BROADCAST"
+        else:
+            target_str = f"0x{target_id:02X}"
         ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"\n{ts}  {BOLD(f'>>> SEND to {target_str}')} seq=0x{seq:02X}"
               f"  \"{text}\"")
@@ -300,7 +316,7 @@ class LoraModule:
 
         self._uart_tx(pkt)
 
-        if target_id != 0xFF:
+        if not is_broadcast(target_id):
             got = self.ack_event.wait(timeout=ACK_TIMEOUT)
             if got:
                 print(f"     {GREEN(f'[SEND OK]  seq=0x{seq:02X}  ACK received')}")
@@ -310,7 +326,7 @@ class LoraModule:
             print(f"     [BROADCAST]  no ACK wait")
 
         self.send_state = SEND_IDLE
-        return got if target_id != 0xFF else True
+        return got if not is_broadcast(target_id) else True
 
     # ── 心跳任务 ──
     def _heartbeat_loop(self):
@@ -381,11 +397,17 @@ def main():
     def print_help():
         print(f"\n  命令:")
         print(f"    <text>       — 发送消息给当前目标")
-        print(f"    /to <hex>    — 切换目标 (如 /to 01, /to ff)")
-        print(f"    /hb          — 发送心跳")
+        print(f"    /to <hex>    — 切换目标 (/to 01 定点, /to 00 = ALL广播, /to ff = 广播)")
+        print(f"    /hb          — 发送心跳 (广播)")
         print(f"    /stats       — 显示统计")
         print(f"    /q           — 退出")
-        print(f"  当前目标: {BOLD(f'0x{current_target:02X}')}")
+        if current_target == 0x00:
+            t_label = "ALL (广播)"
+        elif current_target == 0xFF:
+            t_label = "BROADCAST"
+        else:
+            t_label = f"0x{current_target:02X}"
+        print(f"  当前目标: {BOLD(t_label)}")
 
     print()
     print_help()
@@ -410,10 +432,15 @@ def main():
                 try:
                     t = int(raw[4:], 16)
                     current_target = t
-                    t_str = "BROADCAST" if t == 0xFF else f"0x{t:02X}"
+                    if t == 0x00:
+                        t_str = "ALL (广播)"
+                    elif t == 0xFF:
+                        t_str = "BROADCAST"
+                    else:
+                        t_str = f"0x{t:02X}"
                     print(f"  目标 -> {BOLD(t_str)}")
                 except ValueError:
-                    print("  /to <hex>  e.g. /to 01")
+                    print("  /to <hex>  e.g. /to 01, /to 00=ALL, /to ff=BROADCAST")
             elif raw == "/hb":
                 module.send_message(0xFF, "HB")
                 stats["tx"] += 1
