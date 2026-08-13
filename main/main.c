@@ -10,8 +10,6 @@
 #include "pwm.h"
 #include "spi.h"
 #include "freertos/semphr.h"
-
-static SemaphoreHandle_t lvgl_mutex = NULL;
 #include "uart.h"
 #include "lcd.h"
 #include "ui.h"
@@ -24,9 +22,12 @@ static SemaphoreHandle_t lvgl_mutex = NULL;
 #include "sleep.h"
 #include "mynvs.h"
 #include "wifi.h"
+
 #define INIT_DONE_BIT (1 << 0) // 定义初始化完成的事件位
 #define ACK_TIMEOUT_MS 3000 // ACK 超时时间为 3 秒
+#define WIFI_AP_TIMEOUT_MS (5 * 60 * 1000) // AP 配网超时时间 5 分钟
 
+static SemaphoreHandle_t lvgl_mutex = NULL;
 static EventGroupHandle_t init_event_group;
 // static QueueHandle_t appQueue;
 static lv_obj_t *scr_loading = NULL; // 用于保存开机动画界面对象，以便后续释放内存
@@ -40,6 +41,7 @@ static char pending_payload[121] = {0}; // 缓存发送的内容
 static uint32_t retry_delay_end_time = 0;   // 重试间隔结束时间 (0=不等待)
 static uint8_t last_seen_seq[256];          // 每个 self_id 最后收到的 seq (去重用)
 static bool   seen_peer[256];               // 记录是否曾收到该 self_id 的消息
+static uint32_t ap_start_tick = 0;          // AP 配网启动时刻 (ms), 0=未在配网
 
 static void update_boot_label_cb(void *arg) {
     char *text = (char *)arg;
@@ -475,8 +477,11 @@ void app_main_task(void *arg)
 
             {
                 if (current_wifi_state == WIFI_STATE_AP_RUNNING) {
+                    if (ap_start_tick == 0) ap_start_tick = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
                     // 非阻塞检查网页端是否已提交配置
                     if (wifi_check_ap_config_done()) {
+                        ap_start_tick = 0;
                         last_activity_time_us = esp_timer_get_time(); // 别配一半网睡着了
                         ESP_LOGI("APP", "Web config received, switching to STA...");
                         
@@ -489,6 +494,14 @@ void app_main_task(void *arg)
                         // 停止 AP (会自动关闭 Web Server)
                         wifi_ap_stop();
                         vTaskDelay(pdMS_TO_TICKS(200)); // 短暂延时确保底层资源释放
+                    }
+                    else if ((xTaskGetTickCount() * portTICK_PERIOD_MS) - ap_start_tick >= WIFI_AP_TIMEOUT_MS) {
+                        // 5 分钟未收到配置，自动关闭 AP 恢复空闲
+                        ESP_LOGI("APP", "AP config timeout, closing AP");
+                        ap_start_tick = 0;
+                        if (detail_title_label != NULL) lv_label_set_text(detail_title_label, "Config timeout!\nAP closed.");
+                        wifi_ap_stop();
+                        current_wifi_state = WIFI_STATE_IDLE;
                     }
                 }
                 else if (current_wifi_state == WIFI_STATE_CONNECTING_STA) {
@@ -575,33 +588,33 @@ void app_main_task(void *arg)
                 }
             }
 
-            // { // 电量检测
-            //     uint32_t current_tick = xTaskGetTickCount() * portTICK_PERIOD_MS;
-            //     if (current_tick - last_battery_check_time >= 30000) { 
-            //         last_battery_check_time = current_tick;
+            { // 电量检测
+                uint32_t current_tick = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                if (current_tick - last_battery_check_time >= 30000) { 
+                    last_battery_check_time = current_tick;
                     
-            //         // 确保 LoRa 和 WiFi 没在发射 (防止大电流拉低电压导致电量显示暴跌)
-            //         if (send_state == SEND_STATE_IDLE && current_wifi_state == WIFI_STATE_IDLE) {
-            //             float voltage = 0, current = 0;
+                    // 确保 LoRa 和 WiFi 没在发射 (防止大电流拉低电压导致电量显示暴跌)
+                    if (send_state == SEND_STATE_IDLE && current_wifi_state == WIFI_STATE_IDLE) {
+                        float voltage = 0, current = 0;
                         
-            //             // 调用封装好的函数：上电 -> 读取 -> 断电 (全程约 30ms)
-            //             ina219_get_data_once(&voltage, &current);
+                        // 调用封装好的函数：上电 -> 读取 -> 断电 (全程约 30ms)
+                        ina219_get_data_once(&voltage, &current);
                         
-            //             if (voltage > 2.5f && voltage < 4.3f) {
-            //                 uint8_t new_soc = battery_voltage_to_percent(voltage);
+                        if (voltage > 2.5f && voltage < 4.3f) {
+                            uint8_t new_soc = battery_voltage_to_percent(voltage);
                             
-            //                 // 防抖动：电量变化超过 1% 才更新 UI
-            //                 if (abs((int)new_soc - (int)current_soc) >= 1) {
-            //                     current_soc = new_soc;
-            //                     char soc_text[5];
-            //                     snprintf(soc_text, sizeof(soc_text), "%u%%", new_soc);
-            //                     lv_label_set_text(soc_label, soc_text);
-            //                     ESP_LOGI("BATTERY", "V: %.2fV, I: %.2fA, SoC: %d%%", voltage, current, current_soc);
-            //                 }
-            //             }
-            //         }
-            //     }
-            // }
+                            // 防抖动：电量变化超过 1% 才更新 UI
+                            if (abs((int)new_soc - (int)current_soc) >= 1) {
+                                current_soc = new_soc;
+                                char soc_text[5];
+                                snprintf(soc_text, sizeof(soc_text), "%u%%", new_soc);
+                                lv_label_set_text(soc_label, soc_text);
+                                ESP_LOGI("BATTERY", "V: %.2fV, I: %.2fA, SoC: %d%%", voltage, current, current_soc);
+                            }
+                        }
+                    }
+                }
+            }
 
             {
                 uint32_t current_tick = xTaskGetTickCount() * portTICK_PERIOD_MS;
@@ -659,9 +672,9 @@ void peripheral_init_task(void *arg)
     ext_flash_init();
     ESP_LOGI("FLASH", "Initialized Flash...");
     vTaskDelay(pdMS_TO_TICKS(50));
-    // lv_async_call(update_boot_label_cb, "Initializing I2C...");
-    // i2c_master_init();
-    // ESP_LOGI("I2C", "Initialized I2C...");
+    async_boot_label("Initializing I2C...");
+    i2c_master_init();
+    ESP_LOGI("I2C", "Initialized I2C...");
     vTaskDelay(pdMS_TO_TICKS(50));
     async_boot_label("Initializing NVS...");
     nvs_init();

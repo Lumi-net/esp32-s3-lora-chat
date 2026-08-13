@@ -515,16 +515,22 @@ bool set_system_time_manual(int year, int month, int day, int hour, int minute, 
 
 bool check_wifi_saved(void)
 {
-    wifi_config_t wifi_config;
-    esp_err_t err = esp_wifi_get_config(WIFI_IF_STA, &wifi_config);
+    if (!wifi_initialized)
+    {
+        if (wifi_time_init() != ESP_OK) return false;
+    }
 
-    if (err == ESP_OK)
+    // 驱动只在 STA 接口启动时才从 NVS 加载已保存的配置
+    esp_wifi_stop();
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    if (esp_wifi_start() != ESP_OK) return false;
+
+    wifi_config_t wifi_config;
+    bool saved = false;
+    if (esp_wifi_get_config(WIFI_IF_STA, &wifi_config) == ESP_OK)
     {
-        if (strlen((char *)wifi_config.sta.ssid) > 0) return true;
-        else return false;
+        saved = (strlen((char *)wifi_config.sta.ssid) > 0);
     }
-    else 
-    {
-        return false;
-    }
+    if (!saved) esp_wifi_stop(); // 没有配置就把 WiFi 关掉，避免空转耗电
+    return saved;
 }
