@@ -8,7 +8,7 @@ void spi_init()
         .flags = SPICOMMON_BUSFLAG_MASTER,
         .intr_flags = 0,
         .isr_cpu_id = ESP_INTR_CPU_AFFINITY_AUTO,
-        .max_transfer_sz = 240*240*2,
+        .max_transfer_sz = 240 * 240 * 2,
         .miso_io_num = GPIO_NUM_NC,
         .mosi_io_num = GPIO_NUM_11,
         .quadhd_io_num = -1,

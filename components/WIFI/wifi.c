@@ -517,13 +517,15 @@ bool check_wifi_saved(void)
 {
     if (!wifi_initialized)
     {
-        if (wifi_time_init() != ESP_OK) return false;
+        if (wifi_time_init() != ESP_OK)
+            return false;
     }
 
     // 驱动只在 STA 接口启动时才从 NVS 加载已保存的配置
     esp_wifi_stop();
     esp_wifi_set_mode(WIFI_MODE_STA);
-    if (esp_wifi_start() != ESP_OK) return false;
+    if (esp_wifi_start() != ESP_OK)
+        return false;
 
     wifi_config_t wifi_config;
     bool saved = false;
@@ -531,6 +533,7 @@ bool check_wifi_saved(void)
     {
         saved = (strlen((char *)wifi_config.sta.ssid) > 0);
     }
-    if (!saved) esp_wifi_stop(); // 没有配置就把 WiFi 关掉，避免空转耗电
+    if (!saved)
+        esp_wifi_stop(); // 没有配置就把 WiFi 关掉，避免空转耗电
     return saved;
 }

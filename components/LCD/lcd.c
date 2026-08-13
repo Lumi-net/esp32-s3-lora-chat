@@ -4,7 +4,7 @@ esp_lcd_panel_io_handle_t io_handle = NULL;
 esp_lcd_panel_handle_t panel_handle = NULL;
 
 void lcd_init(void)
-    {
+{
     esp_lcd_panel_io_spi_config_t io_config = {
         .dc_gpio_num = GPIO_NUM_13,
         .cs_gpio_num = GPIO_NUM_10,
@@ -16,7 +16,6 @@ void lcd_init(void)
     };
     // 将 LCD 连接到 SPI 总线
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &io_handle));
-
 
     esp_lcd_panel_dev_config_t panel_config = {
         .reset_gpio_num = GPIO_NUM_14,
@@ -35,6 +34,7 @@ void lcd_init(void)
 
     duty_set(512); // 设置背光亮度为 50%
 }
-void lcd_bl(uint16_t duty) {
+void lcd_bl(uint16_t duty)
+{
     duty_set(duty);
 }

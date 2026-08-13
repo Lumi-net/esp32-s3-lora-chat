@@ -23,12 +23,13 @@
 #define SETTINGS_VISIBLE_ITEMS 11
 
 // 聊天页面配置
-#define CHAT_INIT_LOAD_COUNT 30   // 初始加载消息数（预加载超出屏幕）
-#define CHAT_LOAD_MORE_COUNT 10   // 每次向上滑动加载的数量
-#define CHAT_MAX_UI_ITEMS 50      // 界面上保留的最大消息数（超出则删除旧消息）
-#define CHAT_SCROLL_THRESHOLD 50  // 触发加载的滚动阈值
+#define CHAT_INIT_LOAD_COUNT 30  // 初始加载消息数（预加载超出屏幕）
+#define CHAT_LOAD_MORE_COUNT 10  // 每次向上滑动加载的数量
+#define CHAT_MAX_UI_ITEMS 50     // 界面上保留的最大消息数（超出则删除旧消息）
+#define CHAT_SCROLL_THRESHOLD 50 // 触发加载的滚动阈值
 
-typedef enum {
+typedef enum
+{
     DETAIL_STEP_INPUT_ID,
     DETAIL_STEP_INPUT_ALIAS,
     DETAIL_STEP_INPUT_USER_COLOR,
@@ -43,7 +44,7 @@ typedef enum {
 // 聊天页面状态管理（静态变量，仅当前聊天页有效）
 static chat_cursor_t chat_cursor;
 uint8_t g_chat_target_id = 0xFF;
-static bool chat_is_loading = false; // 防止滚动时重复触发加载
+static bool chat_is_loading = false;      // 防止滚动时重复触发加载
 lv_obj_t *g_chat_scroll_container = NULL; // 提升为全局，方便外部追加消息
 char g_chat_last_date[16] = {0};          // 记录当前UI显示的最后一个日期
 
@@ -71,8 +72,8 @@ lv_obj_t *online_labels[MENU_VISIBLE_ITEMS];
 lv_obj_t *time_labels[MENU_VISIBLE_ITEMS];
 lv_obj_t *cursor_labels[MENU_VISIBLE_ITEMS];
 
-uint8_t valid_id_map[256]; 
-uint8_t valid_cnt = 0; 
+uint8_t valid_id_map[256];
+uint8_t valid_cnt = 0;
 uint8_t selected = 0;
 uint8_t first_visible = 0;
 
@@ -128,37 +129,42 @@ static bool parse_uint16(const char *str, void *out, uint8_t base, uint8_t type)
         return false;
 
     // 超出范围
-    if (type == 8) {
+    if (type == 8)
+    {
         if (value > UINT8_MAX)
             return false;
-    } else if (type == 16) {
+    }
+    else if (type == 16)
+    {
         if (value > UINT16_MAX)
             return false;
     }
 
-    if (type == 8) {
+    if (type == 8)
+    {
         *(uint8_t *)out = (uint8_t)value;
-    } else if (type == 16) {
+    }
+    else if (type == 16)
+    {
         *(uint16_t *)out = (uint16_t)value;
     }
     return true;
 }
 
-void lvgl_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map)
+void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
     uint16_t x1 = area->x1, x2 = area->x2;
     uint16_t y1 = area->y1, y2 = area->y2;
 
     // esp_lcd 自动处理 PSRAM 的 Cache 同步，直接传入 px_map 即可
     esp_lcd_panel_draw_bitmap(panel_handle, x1, y1, x2 + 1, y2 + 1, px_map);
-    
+
     // 必须通知 LVGL 刷新完成
     lv_display_flush_ready(disp);
 }
 
-
-
-void ui_init(void) { 
+void ui_init(void)
+{
     lv_init();
     size_t buf_bytes = LVGL_BUF_SIZE * sizeof(lv_color_t);
     lv_color_t *buf1 = heap_caps_malloc(buf_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -170,10 +176,11 @@ void ui_init(void) {
     lv_display_set_flush_cb(lv_disp, lvgl_flush_cb);
 }
 
-void create_ui(void) {
+void create_ui(void)
+{
     lv_obj_t *scr = lv_screen_active();
 
-    lv_obj_clean(scr); 
+    lv_obj_clean(scr);
 
     lv_coord_t screenWidth = lv_display_get_horizontal_resolution(NULL);
     lv_coord_t screenHeight = lv_display_get_vertical_resolution(NULL);
@@ -181,14 +188,12 @@ void create_ui(void) {
     lv_obj_set_style_bg_color(
         scr,
         lv_color_hex(color_index[COLOR_BACKGROUND].color),
-        LV_PART_MAIN
-    );
+        LV_PART_MAIN);
 
     lv_obj_set_style_bg_opa(
         scr,
         LV_OPA_COVER,
-        LV_PART_MAIN
-    );
+        LV_PART_MAIN);
 
     /* 移除屏幕默认的滚动条和边距，确保内容能填满整个屏幕 */
     lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
@@ -197,7 +202,7 @@ void create_ui(void) {
 
     /* ========== 1. 顶部状态栏（位于最上层，始终可见） ========== */
     lv_obj_t *status_bar = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(status_bar, screenWidth, 15); 
+    lv_obj_set_size(status_bar, screenWidth, 15);
     lv_obj_align(status_bar, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_scrollbar_mode(status_bar, LV_SCROLLBAR_MODE_OFF);
     lv_obj_remove_flag(status_bar, LV_OBJ_FLAG_SCROLLABLE);
@@ -217,7 +222,7 @@ void create_ui(void) {
     title_label = lv_label_create(status_bar);
     lv_label_set_text(title_label, status_title);
     lv_obj_set_style_text_color(title_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), LV_STATE_DEFAULT);
-    lv_obj_align(title_label, LV_ALIGN_CENTER, 0, 0);   // 水平垂直居中
+    lv_obj_align(title_label, LV_ALIGN_CENTER, 0, 0); // 水平垂直居中
     lv_obj_set_style_text_font(title_label, &jbm10, LV_PART_MAIN);
 
     /* 状态栏：LoRa 状态指示小方块 */
@@ -244,15 +249,14 @@ void create_ui(void) {
                     screenHeight - 30 - 50);
 
     lv_obj_align(page_container,
-                LV_ALIGN_TOP_MID,
-                0,
-                15);
+                 LV_ALIGN_TOP_MID,
+                 0,
+                 15);
 
     lv_obj_set_style_bg_opa(page_container, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(page_container, 0, 0);
     lv_obj_set_style_pad_all(page_container, 0, 0);
     lv_obj_remove_flag(page_container, LV_OBJ_FLAG_SCROLLABLE);
-
 
     /* ========== 3. 底部圆角输入框 ========== */
     lv_obj_t *input_area = lv_obj_create(scr);
@@ -291,7 +295,7 @@ void create_ui(void) {
     lv_obj_set_style_text_font(input_cnt_left, &jbm10, LV_PART_MAIN);
     lv_obj_set_width(input_cnt_left, LV_PCT(100));
     lv_obj_set_style_text_align(input_cnt_left, LV_TEXT_ALIGN_RIGHT, LV_STATE_DEFAULT);
-    lv_obj_set_height(input_cnt_left, 10); 
+    lv_obj_set_height(input_cnt_left, 10);
 
     shift_icon_obj = lv_obj_create(input_icon_container);
     lv_obj_remove_style_all(shift_icon_obj);
@@ -327,7 +331,6 @@ void create_ui(void) {
 
     update_keyboard_icons();
 
-
     /* 在容器内创建一个文本区域作为真实的输入框 */
     g_ta = lv_textarea_create(input_area);
     lv_textarea_set_placeholder_text(g_ta, "Please Input...");
@@ -338,7 +341,7 @@ void create_ui(void) {
     lv_obj_set_style_text_color(g_ta, lv_color_hex(color_index[COLOR_MSG_TEXT].color), LV_STATE_DEFAULT);
     lv_obj_set_style_radius(g_ta, 8, LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(g_ta, &jbm12, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(g_ta,lv_color_hex(color_index[COLOR_MSG_TEXT].color), LV_PART_CURSOR);
+    lv_obj_set_style_bg_color(g_ta, lv_color_hex(color_index[COLOR_MSG_TEXT].color), LV_PART_CURSOR);
     lv_obj_set_style_bg_opa(g_ta, LV_OPA_COVER, LV_PART_CURSOR);
     lv_obj_set_style_pad_top(g_ta, 2, 0);
     lv_obj_set_style_pad_bottom(g_ta, 2, 0);
@@ -352,22 +355,25 @@ void create_ui(void) {
     lv_obj_add_state(g_ta, LV_STATE_FOCUSED);
 }
 
-static void ui_input_clear(void) {
+static void ui_input_clear(void)
+{
     lv_textarea_set_text(g_ta, "");
     input_remaining_chars = 120;
     lv_label_set_text_fmt(input_cnt_left, "%d", input_remaining_chars);
 }
 
-static void deferred_show_settings_page(lv_timer_t * timer) {
+static void deferred_show_settings_page(lv_timer_t *timer)
+{
     lv_textarea_set_placeholder_text(g_ta, "Please Input...");
     ui_input_clear();
     ui_show_settings_page();
     lv_timer_delete(timer);
 }
 
-static void toast_auto_close_cb(lv_timer_t * timer)
+static void toast_auto_close_cb(lv_timer_t *timer)
 {
-    if (g_current_toast != NULL) {
+    if (g_current_toast != NULL)
+    {
         lv_msgbox_close(g_current_toast); // 关闭弹窗及背景
         g_current_toast = NULL;           // 清空指针
     }
@@ -375,10 +381,11 @@ static void toast_auto_close_cb(lv_timer_t * timer)
 }
 
 // 自动消失弹窗函数
-void show_toast_dialog(const char *msg, uint32_t auto_close_ms) 
+void show_toast_dialog(const char *msg, uint32_t auto_close_ms)
 {
     // 1. 防止重复创建：如果上一个弹窗还没消失，先强制关掉它
-    if (g_current_toast != NULL) {
+    if (g_current_toast != NULL)
+    {
         lv_msgbox_close(g_current_toast);
         g_current_toast = NULL;
     }
@@ -396,7 +403,8 @@ void show_toast_dialog(const char *msg, uint32_t auto_close_ms)
 
 void update_keyboard_icons(void)
 {
-    if (!shift_icon_obj || !lock_icon_obj) return;
+    if (!shift_icon_obj || !lock_icon_obj)
+        return;
 
     lv_color_t base = lv_color_hex(color_index[COLOR_MSG_TEXT].color);
     lv_color_t invert = lv_color_hex(0xFFFFFF - color_index[COLOR_MSG_TEXT].color);
@@ -404,26 +412,34 @@ void update_keyboard_icons(void)
     lv_obj_t *shift_l = lv_obj_get_child(shift_icon_obj, 0);
     lv_obj_t *lock_l = lv_obj_get_child(lock_icon_obj, 0);
 
-    if (shifted) {
+    if (shifted)
+    {
         lv_obj_set_style_bg_color(shift_icon_obj, base, 0);
         lv_obj_set_style_bg_opa(shift_icon_obj, LV_OPA_COVER, 0);
         lv_obj_set_style_text_color(shift_l, invert, 0);
-    } else {
+    }
+    else
+    {
         lv_obj_set_style_bg_opa(shift_icon_obj, LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(shift_l, base, 0);
     }
 
-    if (locked) {
+    if (locked)
+    {
         lv_obj_set_style_bg_color(lock_icon_obj, base, 0);
         lv_obj_set_style_bg_opa(lock_icon_obj, LV_OPA_COVER, 0);
         lv_obj_set_style_text_color(lock_l, invert, 0);
         lv_label_set_text(lock_l, "L");
-    } else if (waited_to_choose) {
+    }
+    else if (waited_to_choose)
+    {
         lv_obj_set_style_bg_opa(lock_icon_obj, LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(lock_l, base, 0);
         char digit[2] = {(char)('0' + wait_choose), '\0'};
         lv_label_set_text(lock_l, digit);
-    } else {
+    }
+    else
+    {
         lv_obj_set_style_bg_opa(lock_icon_obj, LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(lock_l, base, 0);
         lv_label_set_text(lock_l, "?");
@@ -432,27 +448,29 @@ void update_keyboard_icons(void)
 
 void update_lora_status_indicator(void)
 {
-    if (!lora_status_indicator) return;
+    if (!lora_status_indicator)
+        return;
     lv_color_t color;
-    switch (lora_status) {
-        case LORA_STATUS_IDLE:
-            color = lv_palette_main(LV_PALETTE_GREEN);
-            break;
-        case LORA_STATUS_RECEIVING:
-            color = lv_palette_main(LV_PALETTE_BLUE);
-            break;
-        case LORA_STATUS_SENDING:
-            color = lv_palette_main(LV_PALETTE_YELLOW);
-            break;
-        case LORA_STATUS_WAITING_ACK:
-            color = lv_palette_main(LV_PALETTE_PURPLE);
-            break;
-        case LORA_STATUS_TIMEOUT:
-            color = lv_palette_main(LV_PALETTE_RED);
-            break;
-        default:
-            color = lv_palette_main(LV_PALETTE_GREEN);
-            break;
+    switch (lora_status)
+    {
+    case LORA_STATUS_IDLE:
+        color = lv_palette_main(LV_PALETTE_GREEN);
+        break;
+    case LORA_STATUS_RECEIVING:
+        color = lv_palette_main(LV_PALETTE_BLUE);
+        break;
+    case LORA_STATUS_SENDING:
+        color = lv_palette_main(LV_PALETTE_YELLOW);
+        break;
+    case LORA_STATUS_WAITING_ACK:
+        color = lv_palette_main(LV_PALETTE_PURPLE);
+        break;
+    case LORA_STATUS_TIMEOUT:
+        color = lv_palette_main(LV_PALETTE_RED);
+        break;
+    default:
+        color = lv_palette_main(LV_PALETTE_GREEN);
+        break;
     }
     lv_obj_set_style_bg_color(lora_status_indicator, color, 0);
 }
@@ -466,9 +484,10 @@ static void append_message_ui(lv_obj_t *container, LoRaFrameData *frame, char *l
     // 1. 日期处理 (格式: MM/DD)
     char current_date[16];
     snprintf(current_date, sizeof(current_date), "%02d/%02d", frame->month, frame->day);
-    
+
     // 如果日期变了，插入日期标签
-    if (strcmp(current_date, last_date) != 0) {
+    if (strcmp(current_date, last_date) != 0)
+    {
         lv_obj_t *date_label = lv_label_create(container);
         lv_label_set_text(date_label, current_date);
         lv_obj_set_style_text_color(date_label, lv_color_hex(color_index[COLOR_MSG_DATE].color), 0);
@@ -477,7 +496,7 @@ static void append_message_ui(lv_obj_t *container, LoRaFrameData *frame, char *l
         lv_obj_set_style_text_align(date_label, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_margin_top(date_label, 15, 0);
         lv_obj_set_style_margin_bottom(date_label, 10, 0);
-        
+
         strcpy(last_date, current_date);
     }
 
@@ -490,8 +509,9 @@ static void append_message_ui(lv_obj_t *container, LoRaFrameData *frame, char *l
     lv_obj_set_flex_flow(msg_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_row(msg_row, 4, 0);
 
-    if (insert_at_top) {
-        lv_obj_move_to_index(msg_row, 0); 
+    if (insert_at_top)
+    {
+        lv_obj_move_to_index(msg_row, 0);
     }
 
     // 3. 时间标签 (固定宽度，靠左，灰色)
@@ -508,10 +528,13 @@ static void append_message_ui(lv_obj_t *container, LoRaFrameData *frame, char *l
     const char *alias = "Unknown";
     char unknown_alias[8];
     uint32_t acolor = 0xFFFFFF;
-    if (chat_list[frame->self_id].id != 0xFF && chat_list[frame->self_id].alias[0] != '\0') {
+    if (chat_list[frame->self_id].id != 0xFF && chat_list[frame->self_id].alias[0] != '\0')
+    {
         alias = chat_list[frame->self_id].alias;
         acolor = chat_list[frame->self_id].color;
-    } else {
+    }
+    else
+    {
         snprintf(unknown_alias, sizeof(unknown_alias), "0x%02X", frame->self_id);
         alias = unknown_alias;
     }
@@ -537,31 +560,42 @@ static void append_message_ui(lv_obj_t *container, LoRaFrameData *frame, char *l
 // 聊天页面滚动回调（懒加载与内存管理）
 // ==========================================
 
-static void chat_scroll_load_cb(void *arg) {
-    lv_obj_t * container = (lv_obj_t *)arg;
+static void chat_scroll_load_cb(void *arg)
+{
+    lv_obj_t *container = (lv_obj_t *)arg;
     LoRaFrameData frames[CHAT_LOAD_MORE_COUNT];
     uint8_t found = 0;
     char temp_date[16] = {0};
 
-    while (found < CHAT_LOAD_MORE_COUNT) {
-        if (chat_storage_read_prev(&chat_cursor, &frames[found]) != ESP_OK) break;
-        if (g_chat_target_id == 0x00) {
-            if (frames[found].target_id == 0x00) found++;
-        } else {
-            if (frames[found].self_id == g_chat_target_id) found++;
+    while (found < CHAT_LOAD_MORE_COUNT)
+    {
+        if (chat_storage_read_prev(&chat_cursor, &frames[found]) != ESP_OK)
+            break;
+        if (g_chat_target_id == 0x00)
+        {
+            if (frames[found].target_id == 0x00)
+                found++;
+        }
+        else
+        {
+            if (frames[found].self_id == g_chat_target_id)
+                found++;
         }
     }
 
-    if (found > 0) {
+    if (found > 0)
+    {
         lv_obj_t *first_child = lv_obj_get_child(container, 0);
         lv_coord_t first_y_before = first_child ? lv_obj_get_y(first_child) : 0;
 
-        for (int i = 0; i < found; i++) {
+        for (int i = 0; i < found; i++)
+        {
             append_message_ui(container, &frames[i], temp_date, true);
         }
 
         lv_obj_update_layout(container);
-        if (first_child) {
+        if (first_child)
+        {
             lv_coord_t delta = lv_obj_get_y(first_child) - first_y_before;
             lv_obj_scroll_by(container, 0, delta, LV_ANIM_OFF);
             lv_obj_scroll_to_y(container, LV_MAX(lv_obj_get_scroll_y(container), 0), LV_ANIM_OFF);
@@ -570,31 +604,37 @@ static void chat_scroll_load_cb(void *arg) {
     chat_is_loading = false;
 }
 
-static void chat_scroll_cb(lv_event_t * e)
+static void chat_scroll_cb(lv_event_t *e)
 {
-    lv_obj_t * container = lv_event_get_target(e);
+    lv_obj_t *container = lv_event_get_target(e);
     lv_coord_t scroll_y = lv_obj_get_scroll_y(container);
     lv_coord_t max_scroll = lv_obj_get_scroll_bottom(container);
     lv_coord_t container_height = lv_obj_get_height(container);
 
-    if (scroll_y < CHAT_SCROLL_THRESHOLD && !chat_is_loading) {
+    if (scroll_y < CHAT_SCROLL_THRESHOLD && !chat_is_loading)
+    {
         chat_is_loading = true;
         lv_async_call(chat_scroll_load_cb, container);
     }
 
     // 内存管理：当消息过多且用户远离顶部时，删除最旧的消息
     uint32_t child_count = lv_obj_get_child_count(container);
-    if (child_count > CHAT_MAX_UI_ITEMS) {
-        if (scroll_y < container_height / 3) {
+    if (child_count > CHAT_MAX_UI_ITEMS)
+    {
+        if (scroll_y < container_height / 3)
+        {
             lv_obj_t *oldest = lv_obj_get_child(container, 0);
-            if (oldest) lv_obj_delete(oldest);
-        } else if (scroll_y > max_scroll - container_height / 3) {
+            if (oldest)
+                lv_obj_delete(oldest);
+        }
+        else if (scroll_y > max_scroll - container_height / 3)
+        {
             lv_obj_t *newest = lv_obj_get_child(container, -1);
-            if (newest) lv_obj_delete(newest);
+            if (newest)
+                lv_obj_delete(newest);
         }
     }
 }
-
 
 /**
  * @brief 收到新消息时调用，动态追加到聊天界面底部
@@ -604,13 +644,15 @@ void ui_chat_append_new_message(LoRaFrameData *frame)
 {
     // 1. 判断当前是否在聊天界面，且消息匹配当前对话
     bool msg_matches = (g_chat_target_id == 0x00) ? (frame->target_id == 0x00)
-                                                   : (g_chat_target_id == frame->self_id);
-    if (current_page_id != PAGE_CHAT || !msg_matches) {
+                                                  : (g_chat_target_id == frame->self_id);
+    if (current_page_id != PAGE_CHAT || !msg_matches)
+    {
         return;
     }
 
     // 2. 确保容器存在
-    if (g_chat_scroll_container == NULL) return;
+    if (g_chat_scroll_container == NULL)
+        return;
 
     // 3. 调用渲染函数，追加到最底部 (insert_at_top = false)
     append_message_ui(g_chat_scroll_container, frame, g_chat_last_date, false);
@@ -622,24 +664,26 @@ void ui_chat_append_new_message(LoRaFrameData *frame)
 
 void ui_show_chat_page(uint8_t target_id)
 {
-    if (cur_page) {
+    if (cur_page)
+    {
         lv_obj_delete(cur_page);
         cur_page = NULL;
     }
-    
+
     cur_page = lv_obj_create(page_container);
     lv_obj_remove_style_all(cur_page);
     lv_obj_set_size(cur_page, lv_pct(100), lv_pct(100));
     lv_obj_set_style_bg_color(cur_page, lv_color_hex(color_index[COLOR_BACKGROUND].color), 0);
     current_page_id = PAGE_CHAT;
-    
+
     g_chat_target_id = target_id;
     chat_is_loading = false;
     g_chat_last_date[0] = '\0'; // 重置日期状态
 
     char title_buf[48];
     const char *alias = chat_list[target_id].alias;
-    if (alias[0] == '\0') alias = "Unknown";
+    if (alias[0] == '\0')
+        alias = "Unknown";
     snprintf(title_buf, sizeof(title_buf), "CHAT | %s (0x%02X)", alias, target_id);
     lv_obj_t *chat_title = lv_label_create(cur_page);
     lv_label_set_text(chat_title, title_buf);
@@ -658,34 +702,45 @@ void ui_show_chat_page(uint8_t target_id)
     lv_obj_set_style_pad_all(g_chat_scroll_container, 8, 0);
     lv_obj_set_scrollbar_mode(g_chat_scroll_container, LV_SCROLLBAR_MODE_OFF);
     lv_obj_remove_flag(g_chat_scroll_container, LV_OBJ_FLAG_SCROLL_ELASTIC);
-    
+
     // 绑定滚动事件
     lv_obj_add_event_cb(g_chat_scroll_container, chat_scroll_cb, LV_EVENT_SCROLL, NULL);
 
     // --- 核心：使用游标进行初始懒加载 ---
     chat_read_backward_init(&chat_cursor);
-    
+
     LoRaFrameData frames[CHAT_INIT_LOAD_COUNT];
     uint8_t found = 0;
-    
-    while (found < CHAT_INIT_LOAD_COUNT) {
-        if (chat_storage_read_prev(&chat_cursor, &frames[found]) != ESP_OK) break;
-        if (target_id == 0x00) {
-            if (frames[found].target_id == 0x00) found++;
-        } else {
-            if (frames[found].self_id == target_id) found++;
+
+    while (found < CHAT_INIT_LOAD_COUNT)
+    {
+        if (chat_storage_read_prev(&chat_cursor, &frames[found]) != ESP_OK)
+            break;
+        if (target_id == 0x00)
+        {
+            if (frames[found].target_id == 0x00)
+                found++;
+        }
+        else
+        {
+            if (frames[found].self_id == target_id)
+                found++;
         }
     }
 
-    if (found > 0) {
+    if (found > 0)
+    {
         snprintf(g_chat_last_date, sizeof(g_chat_last_date), "%02d/%02d", frames[0].month, frames[0].day);
         char last_date[16] = {0};
-        for (int i = found - 1; i >= 0; i--) {
+        for (int i = found - 1; i >= 0; i--)
+        {
             append_message_ui(g_chat_scroll_container, &frames[i], last_date, false);
         }
         lv_obj_update_layout(g_chat_scroll_container);
         lv_obj_scroll_to_y(g_chat_scroll_container, LV_COORD_MAX, LV_ANIM_OFF);
-    } else {
+    }
+    else
+    {
         lv_obj_t *empty_label = lv_label_create(g_chat_scroll_container);
         lv_label_set_text(empty_label, "No messages");
         lv_obj_set_style_text_color(empty_label, lv_color_hex(0x666666), 0);
@@ -693,15 +748,17 @@ void ui_show_chat_page(uint8_t target_id)
     }
 }
 
-
 // ==========================================
 // 核心辅助函数：构建有效 ID 映射表
 // ==========================================
-void rebuild_valid_id_map(void) {
+void rebuild_valid_id_map(void)
+{
     valid_cnt = 0;
     // 从 0 到 255 遍历，天然保证了按 id 从小到大排序
-    for (uint16_t i = 0; i < 256; i++) {
-        if (chat_list[i].id != 0xFF) {
+    for (uint16_t i = 0; i < 256; i++)
+    {
+        if (chat_list[i].id != 0xFF)
+        {
             valid_id_map[valid_cnt++] = i; // 记录有效的真实下标(即id) 并计数valid_cnt
         }
     }
@@ -716,19 +773,20 @@ void menu_refresh(void)
     uint8_t visible = (valid_cnt < MENU_VISIBLE_ITEMS) ? valid_cnt : MENU_VISIBLE_ITEMS; // 计算一屏显示几个
     char time_str[16];
 
-    for(uint8_t i = 0; i < visible; i++)
+    for (uint8_t i = 0; i < visible; i++)
     {
         uint8_t map_idx = first_visible + i;
         // 通过映射表，将“菜单连续索引”转换为“chat_list 真实下标”
-        uint8_t actual_id = valid_id_map[map_idx]; 
+        uint8_t actual_id = valid_id_map[map_idx];
 
         // 获取 alias，增加防御性处理（防止空字符串）
         const char *alias = chat_list[actual_id].alias;
-        if (alias[0] == '\0') {
+        if (alias[0] == '\0')
+        {
             alias = "Null"; // 如果没有别名，显示默认文本（事实上必须有 加联系人的时候必须输入一个）
         }
         lv_label_set_text(alias_labels[i], alias);
-        
+
         // 设置 ID
         char id_str[8];
         snprintf(id_str, sizeof(id_str), "0x%02X", actual_id);
@@ -736,26 +794,32 @@ void menu_refresh(void)
 
         // 设置在线
         uint32_t last_online = chat_list[actual_id].last_online;
-        if (last_online > 0) {
+        if (last_online > 0)
+        {
             uint8_t month = last_online / 1000000;
             uint8_t day = (last_online / 10000) % 100;
             uint8_t hour = (last_online / 100) % 100;
             uint8_t minute = last_online % 100;
             snprintf(time_str, sizeof(time_str), "%02d/%02d %02d:%02d", month, day, hour, minute);
-        } else {
+        }
+        else
+        {
             snprintf(time_str, sizeof(time_str), "Maybe Offline");
         }
         lv_label_set_text(online_labels[i], time_str);
 
         // 设置时间
         uint32_t last_time = chat_list[actual_id].last_time;
-        if (last_time > 0) {
+        if (last_time > 0)
+        {
             uint8_t month = last_time / 1000000;
             uint8_t day = (last_time / 10000) % 100;
             uint8_t hour = (last_time / 100) % 100;
             uint8_t minute = last_time % 100;
             snprintf(time_str, sizeof(time_str), "%02d/%02d %02d:%02d", month, day, hour, minute);
-        } else {
+        }
+        else
+        {
             snprintf(time_str, sizeof(time_str), "No messages");
         }
         lv_label_set_text(time_labels[i], time_str);
@@ -766,12 +830,13 @@ void menu_refresh(void)
 
 void menu_down(void)
 {
-    if (selected + 1 >= valid_cnt) return;
+    if (selected + 1 >= valid_cnt)
+        return;
 
     uint8_t old_ui = selected - first_visible;
     selected++;
 
-    if(selected >= first_visible + MENU_VISIBLE_ITEMS)
+    if (selected >= first_visible + MENU_VISIBLE_ITEMS)
     {
         first_visible++;
         menu_refresh();
@@ -785,12 +850,13 @@ void menu_down(void)
 
 void menu_up(void)
 {
-    if(selected == 0) return;
+    if (selected == 0)
+        return;
 
     uint8_t old_ui = selected - first_visible;
     selected--;
 
-    if(selected < first_visible)
+    if (selected < first_visible)
     {
         first_visible--;
         menu_refresh();
@@ -804,9 +870,10 @@ void menu_up(void)
 
 uint8_t menu_get_chat_id(void)
 {
-    if (valid_cnt == 0) return 0x00;
+    if (valid_cnt == 0)
+        return 0x00;
     // 直接通过映射表获取当前选中项的真实 ID
-    return valid_id_map[selected]; 
+    return valid_id_map[selected];
 }
 
 // ==========================================
@@ -814,7 +881,8 @@ uint8_t menu_get_chat_id(void)
 // ==========================================
 void ui_show_menu_page(void)
 {
-    if (cur_page) {
+    if (cur_page)
+    {
         lv_obj_delete(cur_page);
         cur_page = NULL;
     }
@@ -827,10 +895,11 @@ void ui_show_menu_page(void)
     current_page_id = PAGE_MENU;
 
     // 1. 动态获取数据，构建按 ID 排序的映射表
-    rebuild_valid_id_map(); 
+    rebuild_valid_id_map();
 
     // 2. 处理空列表情况
-    if (valid_cnt == 0) {
+    if (valid_cnt == 0)
+    {
         lv_obj_t *empty_label = lv_label_create(cur_page);
         lv_label_set_text(empty_label, "No Contacts");
         lv_obj_set_style_text_color(empty_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
@@ -839,7 +908,6 @@ void ui_show_menu_page(void)
     }
 
     // 创建光标 (仅在存在联系人时)
-
 
     lv_obj_t *menu_title = lv_label_create(cur_page);
     lv_label_set_text(menu_title, "Menu");
@@ -865,7 +933,7 @@ void ui_show_menu_page(void)
     // const uint16_t ALIAS_WIDTH = 160; // Alias 标签固定宽度
     // const uint16_t ID_WIDTH = 30;     // ID 标签固定宽度
 
-    for(uint8_t i = 0; i < visible; i++)
+    for (uint8_t i = 0; i < visible; i++)
     {
         // 每个联系人的行容器（垂直 Flex，分上下两排）
         lv_obj_t *row = lv_obj_create(menu_container);
@@ -874,7 +942,7 @@ void ui_show_menu_page(void)
         lv_obj_set_width(row, lv_pct(100));
         lv_obj_set_height(row, ITEM_HEIGHT);
         lv_obj_set_layout(row, LV_LAYOUT_FLEX);
-        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN); 
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
 
         // --- 第一排：Alias 和 ID ---
         lv_obj_t *top_row = lv_obj_create(row);
@@ -884,7 +952,7 @@ void ui_show_menu_page(void)
         lv_obj_set_height(top_row, 16);
         lv_obj_set_layout(top_row, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(top_row, LV_FLEX_FLOW_ROW);
-        
+
         cursor_labels[i] = lv_label_create(top_row);
         lv_obj_set_width(cursor_labels[i], 20);
         lv_label_set_text(cursor_labels[i], " ");
@@ -915,7 +983,7 @@ void ui_show_menu_page(void)
         lv_obj_set_height(bottom_row, 14);
         lv_obj_set_layout(bottom_row, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(bottom_row, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(bottom_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER); 
+        lv_obj_set_flex_align(bottom_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
         online_labels[i] = lv_label_create(bottom_row);
         lv_label_set_text(online_labels[i], "Offline"); // 初始文本
@@ -941,37 +1009,48 @@ void ui_show_menu_page(void)
 // 2. 辅助函数：光标移动逻辑 (支持翻页)
 // ==========================================
 
-void settings_refresh(void) {
+void settings_refresh(void)
+{
     uint8_t visible = (SETTINGS_COUNT < SETTINGS_VISIBLE_ITEMS) ? SETTINGS_COUNT : SETTINGS_VISIBLE_ITEMS;
-    for (uint8_t i = 0; i < visible; i++) {
+    for (uint8_t i = 0; i < visible; i++)
+    {
         uint8_t idx = first_visible + i;
         lv_label_set_text(settings_labels[i], settings_items[idx]);
     }
 }
 
-void settings_update_cursor(void) {
-    if (SETTINGS_COUNT > 0 && selected < SETTINGS_COUNT) {
+void settings_update_cursor(void)
+{
+    if (SETTINGS_COUNT > 0 && selected < SETTINGS_COUNT)
+    {
         uint8_t ui_idx = selected - first_visible;
-        if (ui_idx < SETTINGS_VISIBLE_ITEMS && settings_labels[ui_idx]) {
+        if (ui_idx < SETTINGS_VISIBLE_ITEMS && settings_labels[ui_idx])
+        {
             lv_obj_align_to(page_cursor, settings_labels[ui_idx], LV_ALIGN_OUT_LEFT_MID, -8, 0);
         }
     }
 }
 
-void settings_down(void) {
-    if (selected + 1 >= SETTINGS_COUNT) return;
+void settings_down(void)
+{
+    if (selected + 1 >= SETTINGS_COUNT)
+        return;
     selected++;
-    if (selected >= first_visible + SETTINGS_VISIBLE_ITEMS) {
+    if (selected >= first_visible + SETTINGS_VISIBLE_ITEMS)
+    {
         first_visible++;
         settings_refresh();
     }
     settings_update_cursor();
 }
 
-void settings_up(void) {
-    if (selected == 0) return;
+void settings_up(void)
+{
+    if (selected == 0)
+        return;
     selected--;
-    if (selected < first_visible) {
+    if (selected < first_visible)
+    {
         first_visible--;
         settings_refresh();
     }
@@ -980,18 +1059,19 @@ void settings_up(void) {
 
 void ui_show_settings_page(void)
 {
-    if (cur_page) {
+    if (cur_page)
+    {
         lv_obj_delete(cur_page);
         cur_page = NULL;
         page_cursor = NULL;
-        detail_title_label = NULL; 
+        detail_title_label = NULL;
         detail_hint_label = NULL;
     }
 
     cur_page = lv_obj_create(page_container);
     lv_obj_remove_style_all(cur_page);
     lv_obj_set_size(cur_page, lv_pct(100), lv_pct(100));
-    
+
     current_page_id = PAGE_SETTINGS;
     key_set_locked(true);
     update_keyboard_icons();
@@ -1017,11 +1097,12 @@ void ui_show_settings_page(void)
     lv_obj_set_style_pad_row(settings_container, 4, 0);
     lv_obj_set_style_pad_all(settings_container, 15, 0);
 
-    selected = 0; 
+    selected = 0;
     first_visible = 0;
 
     uint8_t visible = (SETTINGS_COUNT < SETTINGS_VISIBLE_ITEMS) ? SETTINGS_COUNT : SETTINGS_VISIBLE_ITEMS;
-    for (uint8_t i = 0; i < visible; i++) {
+    for (uint8_t i = 0; i < visible; i++)
+    {
         lv_obj_t *item_label = lv_label_create(settings_container);
         lv_label_set_text(item_label, settings_items[i]);
         lv_obj_set_style_text_color(item_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
@@ -1034,9 +1115,11 @@ void ui_show_settings_page(void)
     settings_refresh();
     settings_update_cursor();
 }
-void ui_show_settings_change_alias_or_user_color(void) {
+void ui_show_settings_change_alias_or_user_color(void)
+{
     // 1. 清理旧页面
-    if (cur_page) {
+    if (cur_page)
+    {
         lv_obj_delete(cur_page);
         cur_page = NULL;
     }
@@ -1045,7 +1128,7 @@ void ui_show_settings_change_alias_or_user_color(void) {
     cur_page = lv_obj_create(page_container);
     lv_obj_remove_style_all(cur_page);
     lv_obj_set_size(cur_page, lv_pct(100), lv_pct(100));
-    
+
     current_page_id = PAGE_SETTINGS_DETAIL;
     current_detail_step = DETAIL_STEP_INPUT_ID; // 初始状态为输入 ID
     target_change_id = 0xFF;
@@ -1060,9 +1143,11 @@ void ui_show_settings_change_alias_or_user_color(void) {
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
-void ui_show_settings_add_contact(void) {
+void ui_show_settings_add_contact(void)
+{
     // 1. 清理旧页面
-    if (cur_page) {
+    if (cur_page)
+    {
         lv_obj_delete(cur_page);
         cur_page = NULL;
     }
@@ -1071,7 +1156,7 @@ void ui_show_settings_add_contact(void) {
     cur_page = lv_obj_create(page_container);
     lv_obj_remove_style_all(cur_page);
     lv_obj_set_size(cur_page, lv_pct(100), lv_pct(100));
-    
+
     current_page_id = PAGE_SETTINGS_DETAIL;
     current_detail_step = DETAIL_STEP_INPUT_ID; // 初始状态为输入 ID
     target_change_id = 0xFF;
@@ -1086,9 +1171,11 @@ void ui_show_settings_add_contact(void) {
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
-void ui_show_settings_change_interface_color(void) {
+void ui_show_settings_change_interface_color(void)
+{
     // 1. 清理旧页面
-    if (cur_page) {
+    if (cur_page)
+    {
         lv_obj_delete(cur_page);
         cur_page = NULL;
     }
@@ -1097,7 +1184,7 @@ void ui_show_settings_change_interface_color(void) {
     cur_page = lv_obj_create(page_container);
     lv_obj_remove_style_all(cur_page);
     lv_obj_set_size(cur_page, lv_pct(100), lv_pct(100));
-    
+
     current_page_id = PAGE_SETTINGS_DETAIL;
     current_detail_step = DETAIL_STEP_INPUT_ID; // 初始状态为输入 ID
     target_change_id = 0xFF;
@@ -1123,9 +1210,11 @@ void ui_show_settings_change_interface_color(void) {
     lv_obj_align(detail_hint_label, LV_ALIGN_BOTTOM_MID, 0, -40);
 }
 
-void ui_show_settings_wifi(void) {
+void ui_show_settings_wifi(void)
+{
     // 1. 清理旧页面
-    if (cur_page) {
+    if (cur_page)
+    {
         lv_obj_delete(cur_page);
         cur_page = NULL;
     }
@@ -1134,7 +1223,7 @@ void ui_show_settings_wifi(void) {
     cur_page = lv_obj_create(page_container);
     lv_obj_remove_style_all(cur_page);
     lv_obj_set_size(cur_page, lv_pct(100), lv_pct(100));
-    
+
     current_page_id = PAGE_SETTINGS_DETAIL;
     current_detail_step = DETAIL_STEP_INPUT_ID; // 初始状态为输入 ID
     target_change_id = 0xFF;
@@ -1149,9 +1238,11 @@ void ui_show_settings_wifi(void) {
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
-void ui_show_settings_time(void) {
+void ui_show_settings_time(void)
+{
     // 1. 清理旧页面
-    if (cur_page) {
+    if (cur_page)
+    {
         lv_obj_delete(cur_page);
         cur_page = NULL;
     }
@@ -1160,7 +1251,7 @@ void ui_show_settings_time(void) {
     cur_page = lv_obj_create(page_container);
     lv_obj_remove_style_all(cur_page);
     lv_obj_set_size(cur_page, lv_pct(100), lv_pct(100));
-    
+
     current_page_id = PAGE_SETTINGS_DETAIL;
     current_detail_step = DETAIL_STEP_INPUT_ID; // 初始状态为输入 ID(实则并不是ID 但是为了少写点代码 就这样吧)
     target_change_id = 0xFF;
@@ -1175,9 +1266,11 @@ void ui_show_settings_time(void) {
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
-void ui_show_settings_sleep_time(void) {
+void ui_show_settings_sleep_time(void)
+{
     // 1. 清理旧页面
-    if (cur_page) {
+    if (cur_page)
+    {
         lv_obj_delete(cur_page);
         cur_page = NULL;
     }
@@ -1186,7 +1279,7 @@ void ui_show_settings_sleep_time(void) {
     cur_page = lv_obj_create(page_container);
     lv_obj_remove_style_all(cur_page);
     lv_obj_set_size(cur_page, lv_pct(100), lv_pct(100));
-    
+
     current_page_id = PAGE_SETTINGS_DETAIL;
     current_detail_step = DETAIL_STEP_INPUT_ID; // 初始状态为输入 ID(实则并不是ID 但是为了少写点代码 就这样吧)
     target_change_id = 0xFF;
@@ -1201,9 +1294,11 @@ void ui_show_settings_sleep_time(void) {
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
-void ui_show_settings_brightness(void) {
+void ui_show_settings_brightness(void)
+{
     // 1. 清理旧页面
-    if (cur_page) {
+    if (cur_page)
+    {
         lv_obj_delete(cur_page);
         cur_page = NULL;
     }
@@ -1212,7 +1307,7 @@ void ui_show_settings_brightness(void) {
     cur_page = lv_obj_create(page_container);
     lv_obj_remove_style_all(cur_page);
     lv_obj_set_size(cur_page, lv_pct(100), lv_pct(100));
-    
+
     current_page_id = PAGE_SETTINGS_DETAIL;
     current_detail_step = DETAIL_STEP_INPUT_ID; // 初始状态为输入 ID(实则并不是ID 但是为了少写点代码 就这样吧)
     target_change_id = 0xFF;
@@ -1227,8 +1322,10 @@ void ui_show_settings_brightness(void) {
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
-void ui_show_settings_customize_title(void) {
-    if (cur_page) {
+void ui_show_settings_customize_title(void)
+{
+    if (cur_page)
+    {
         lv_obj_delete(cur_page);
         cur_page = NULL;
     }
@@ -1250,13 +1347,16 @@ void ui_show_settings_customize_title(void) {
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
-static void generate_confirm_code(void) {
+static void generate_confirm_code(void)
+{
     uint32_t r = esp_random() & 0xFFFF;
     snprintf(confirm_code, sizeof(confirm_code), "%04X", (unsigned int)(r & 0xFFFF));
 }
 
-void ui_show_settings_clear_flash(void) {
-    if (cur_page) {
+void ui_show_settings_clear_flash(void)
+{
+    if (cur_page)
+    {
         lv_obj_delete(cur_page);
         cur_page = NULL;
     }
@@ -1280,8 +1380,10 @@ void ui_show_settings_clear_flash(void) {
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
-void ui_show_settings_clear_nvs(void) {
-    if (cur_page) {
+void ui_show_settings_clear_nvs(void)
+{
+    if (cur_page)
+    {
         lv_obj_delete(cur_page);
         cur_page = NULL;
     }
@@ -1305,9 +1407,11 @@ void ui_show_settings_clear_nvs(void) {
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
-void handle_settings_detail_enter(void) {
+void handle_settings_detail_enter(void)
+{
     // 1. 确保我们在正确的页面
-    if (current_page_id != PAGE_SETTINGS_DETAIL) return;
+    if (current_page_id != PAGE_SETTINGS_DETAIL)
+        return;
 
     key_set_shifted(false);
     key_set_locked(false);
@@ -1321,67 +1425,77 @@ void handle_settings_detail_enter(void) {
     // ==========================================
     // 状态 1: 用户刚刚输入完 ID，按下了 ENTER
     // ==========================================
-    if (current_detail_step == DETAIL_STEP_INPUT_ID) {
-        if (selected == 0 || selected == 1) { // "Change Alias" 和 "Change User Color"
-            if (strlen(safe_input) == 0) return; // 空输入忽略
+    if (current_detail_step == DETAIL_STEP_INPUT_ID)
+    {
+        if (selected == 0 || selected == 1)
+        { // "Change Alias" 和 "Change User Color"
+            if (strlen(safe_input) == 0)
+                return; // 空输入忽略
 
             uint8_t id;
             bool ok = parse_uint16(safe_input, &id, 16, 8);
 
             // 验证 ID 是否有效 (必须在 0-255 范围内，且 chat_list 中该 ID 存在)
-            if (!ok || chat_list[id].id == 0xFF) {
+            if (!ok || chat_list[id].id == 0xFF)
+            {
                 ESP_LOGW("SETTINGS", "Invalid or non-existent ID: %d", id);
-                
+
                 // UI 反馈：显示错误并清空，让用户重试
                 lv_label_set_text(detail_title_label, "Invalid ID! Try again.");
                 ui_input_clear();
-                
+
                 show_toast_dialog("Invalid ID!", 3000);
                 return;
             }
 
             // --- ID 验证通过，进入步骤 2 ---
             target_change_id = id;
-            if (selected == 0) {
+            if (selected == 0)
+            {
                 current_detail_step = DETAIL_STEP_INPUT_ALIAS;
 
                 // 更新 UI，准备接收 Alias
                 char title_buf[64];
                 snprintf(title_buf, sizeof(title_buf), "New Alias for ID: %02X", id);
                 lv_label_set_text(detail_title_label, title_buf);
-                
+
                 ui_input_clear(); // 清空输入框
                 lv_textarea_set_placeholder_text(g_ta, "Type new alias...");
 
                 ESP_LOGI("SETTINGS", "ID %d validated. Ready for alias input.", id);
-            } else if (selected == 1) {
+            }
+            else if (selected == 1)
+            {
                 current_detail_step = DETAIL_STEP_INPUT_USER_COLOR;
 
                 // 更新 UI，准备接收 Color
                 char title_buf[64];
                 snprintf(title_buf, sizeof(title_buf), "New Color for ID: %02X", id);
                 lv_label_set_text(detail_title_label, title_buf);
-                
+
                 ui_input_clear(); // 清空输入框
                 lv_textarea_set_placeholder_text(g_ta, "Type new color...");
 
                 ESP_LOGI("SETTINGS", "ID %d validated. Ready for color input.", id);
             }
         }
-        else if (selected == 2) { // "Change Interface Color"
-            if (strlen(safe_input) == 0) return; // 空输入忽略
+        else if (selected == 2)
+        { // "Change Interface Color"
+            if (strlen(safe_input) == 0)
+                return; // 空输入忽略
 
             uint8_t id;
             bool ok = parse_uint16(safe_input, &id, 16, 8);
 
             // 验证 ID 是否有效
-            if (!ok || id >= COLOR_MAX) {
+            if (!ok || id >= COLOR_MAX)
+            {
                 ESP_LOGW("SETTINGS", "Invalid or non-existent ID: %d", id);
-                
+
                 // UI 反馈：显示错误并清空，让用户重试
                 lv_label_set_text(detail_title_label, "Invalid ID! Try again.");
                 ui_input_clear();
-                
+
                 show_toast_dialog("Invalid ID!", 3000);
                 return;
             }
@@ -1394,14 +1508,16 @@ void handle_settings_detail_enter(void) {
             char title_buf[64];
             snprintf(title_buf, sizeof(title_buf), "New Color for ID: %02X", id);
             lv_label_set_text(detail_title_label, title_buf);
-            
+
             ui_input_clear(); // 清空输入框
             lv_textarea_set_placeholder_text(g_ta, "Type new color...");
 
             ESP_LOGI("SETTINGS", "ID %d validated. Ready for alias input.", id);
         }
-        else if (selected == 3) { // "Wi-Fi"
-            if (strlen(safe_input) == 0) { // 空输入转Soft AP
+        else if (selected == 3)
+        { // "Wi-Fi"
+            if (strlen(safe_input) == 0)
+            { // 空输入转Soft AP
                 uint32_t r = esp_random();
                 char temp_password[9];
                 snprintf(temp_password, sizeof(temp_password), "%08lu", r);
@@ -1415,73 +1531,88 @@ void handle_settings_detail_enter(void) {
                 UIEvent ev = {.type = EVENT_WIFI, .wifi_state = WIFI_STATE_AP_RUNNING};
                 xQueueSend(appQueue, &ev, 0);
                 return;
-            }   
+            }
 
             // 验证 ID 是否有效
-            if (strlen(safe_input) > 32) {
+            if (strlen(safe_input) > 32)
+            {
                 ESP_LOGW("SETTINGS", "Invalid or non-existent SSID: %s", safe_input);
-                
+
                 // UI 反馈：显示错误并清空，让用户重试
                 lv_label_set_text(detail_title_label, "Invalid SSID! Try again. Max 32 chars.");
                 ui_input_clear();
-                
+
                 show_toast_dialog("SSID Too Long! Max 32 chars", 3000);
                 return;
             }
 
             strncpy(target_wifi_ssid, safe_input, sizeof(target_wifi_ssid) - 1);
             target_wifi_ssid[sizeof(target_wifi_ssid) - 1] = '\0';
-            
+
             current_detail_step = DETAIL_STEP_INPUT_PASSWORD;
 
             // 更新 UI，准备接收 Password
             char title_buf[64];
             snprintf(title_buf, sizeof(title_buf), "Password for SSID: %s", target_wifi_ssid);
             lv_label_set_text(detail_title_label, title_buf);
-            
+
             ui_input_clear(); // 清空输入框
             lv_textarea_set_placeholder_text(g_ta, "Type password...");
 
             ESP_LOGI("SETTINGS", "SSID %d validated. Ready for password input.", target_wifi_ssid);
         }
-        else if (selected == 4) { // "Time"
-            if (strlen(safe_input) == 0) { // 空输入转NTP同步
+        else if (selected == 4)
+        { // "Time"
+            if (strlen(safe_input) == 0)
+            { // 空输入转NTP同步
                 UIEvent ev = {.type = EVENT_WIFI, .wifi_state = WIFI_STATE_CONNECTING_STA};
                 xQueueSend(appQueue, &ev, 0);
                 return;
             }
             int y, mo, d, h, mi, s;
-            if (sscanf(safe_input, "%4d%2d%2d%2d%2d%2d", &y, &mo, &d, &h, &mi, &s) == 6) {
-                if (set_system_time_manual(y, mo, d, h, mi, s)) {
+            if (sscanf(safe_input, "%4d%2d%2d%2d%2d%2d", &y, &mo, &d, &h, &mi, &s) == 6)
+            {
+                if (set_system_time_manual(y, mo, d, h, mi, s))
+                {
                     lv_label_set_text(detail_title_label, "Time Set OK!");
                     lv_timer_create(deferred_show_settings_page, 2000, NULL);
-                } else {
+                }
+                else
+                {
                     lv_label_set_text(detail_title_label, "Invalid Time!");
                     lv_timer_create(deferred_show_settings_page, 2000, NULL);
                 }
             }
         }
-        else if (selected == 5) { // "Auto Sleep Time"
-            if (strlen(safe_input) == 0) return; // 空输入忽略
+        else if (selected == 5)
+        { // "Auto Sleep Time"
+            if (strlen(safe_input) == 0)
+                return; // 空输入忽略
 
             uint16_t time;
             bool ok = parse_uint16(safe_input, &time, 10, 16);
 
             // 验证 ID 是否有效
-            if (ok) {
+            if (ok)
+            {
                 esp_err_t err = nvs_set_sleep_time(time);
-                if (err == ESP_OK) {
+                if (err == ESP_OK)
+                {
                     ESP_LOGI("SETTINGS", "Sleep Time Set OK: %d", time);
                     lv_label_set_text(detail_title_label, "OK!");
                     ui_input_clear();
                     lv_timer_create(deferred_show_settings_page, 2000, NULL);
-                } else {
+                }
+                else
+                {
                     ESP_LOGW("SETTINGS", "Sleep Time Set Failed: %d", time);
                     lv_label_set_text(detail_title_label, "Something was wrong...\nPlease try again.");
                     ui_input_clear();
                     lv_timer_create(deferred_show_settings_page, 2000, NULL);
                 }
-            } else {
+            }
+            else
+            {
                 ESP_LOGW("SETTINGS", "Invalid Sleep Time: %d", time);
                 // UI 反馈：显示错误并清空，让用户重试
                 lv_label_set_text(detail_title_label, "Invalid Time! Try again. Max 65535.");
@@ -1489,27 +1620,35 @@ void handle_settings_detail_enter(void) {
                 return;
             }
         }
-        else if (selected == 6) { // "Change Brightness"
-            if (strlen(safe_input) == 0) return; // 空输入忽略
+        else if (selected == 6)
+        { // "Change Brightness"
+            if (strlen(safe_input) == 0)
+                return; // 空输入忽略
 
             uint16_t brightness;
             bool ok = parse_uint16(safe_input, &brightness, 10, 16);
 
             // 验证 ID 是否有效
-            if (ok && brightness <= 100 && brightness >= 10) {
-                esp_err_t err = nvs_set_brightness(brightness*10);
-                if (err == ESP_OK) {
+            if (ok && brightness <= 100 && brightness >= 10)
+            {
+                esp_err_t err = nvs_set_brightness(brightness * 10);
+                if (err == ESP_OK)
+                {
                     ESP_LOGI("SETTINGS", "Brightness Set OK: %u", brightness);
                     lv_label_set_text(detail_title_label, "OK!");
                     ui_input_clear();
                     lv_timer_create(deferred_show_settings_page, 2000, NULL);
-                } else {
+                }
+                else
+                {
                     ESP_LOGW("SETTINGS", "Brightness Set Failed: %u", brightness);
                     lv_label_set_text(detail_title_label, "Something was wrong...\nPlease try again.");
                     ui_input_clear();
                     lv_timer_create(deferred_show_settings_page, 2000, NULL);
                 }
-            } else {
+            }
+            else
+            {
                 ESP_LOGW("SETTINGS", "Invalid brightness: %u", brightness);
                 // UI 反馈：显示错误并清空，让用户重试
                 lv_label_set_text(detail_title_label, "Invalid Brightness! Try again. 10~100.");
@@ -1517,10 +1656,13 @@ void handle_settings_detail_enter(void) {
                 return;
             }
         }
-        else if (selected == 7) { // "Customize Title"
-            if (strlen(safe_input) == 0) return;
+        else if (selected == 7)
+        { // "Customize Title"
+            if (strlen(safe_input) == 0)
+                return;
 
-            if (strlen(safe_input) > 16) {
+            if (strlen(safe_input) > 16)
+            {
                 ESP_LOGW("SETTINGS", "Title too long: %d", strlen(safe_input));
                 lv_label_set_text(detail_title_label, "Too long! Max 16 characters.");
                 ui_input_clear();
@@ -1528,26 +1670,32 @@ void handle_settings_detail_enter(void) {
             }
 
             esp_err_t err = nvs_set_status_title(safe_input);
-            if (err == ESP_OK) {
+            if (err == ESP_OK)
+            {
                 lv_label_set_text(title_label, status_title);
                 ESP_LOGI("SETTINGS", "Title Set OK: [%s]", status_title);
                 lv_label_set_text(detail_title_label, "OK!");
                 ui_input_clear();
                 lv_timer_create(deferred_show_settings_page, 2000, NULL);
-            } else {
+            }
+            else
+            {
                 ESP_LOGW("SETTINGS", "Title Set Failed: %s", esp_err_to_name(err));
                 lv_label_set_text(detail_title_label, "Something was wrong...\nPlease try again.");
                 ui_input_clear();
                 lv_timer_create(deferred_show_settings_page, 2000, NULL);
             }
         }
-        if (selected == 8) { // "Add/Remove a contact"
-            if (strlen(safe_input) == 0) return;
+        if (selected == 8)
+        { // "Add/Remove a contact"
+            if (strlen(safe_input) == 0)
+                return;
 
             uint8_t id;
             bool ok = parse_uint16(safe_input, &id, 16, 8);
 
-            if (!ok || id == 0xFF) {
+            if (!ok || id == 0xFF)
+            {
                 ESP_LOGW("SETTINGS", "Invalid ID: %d", id);
                 lv_label_set_text(detail_title_label, "Invalid ID! Try again.");
                 ui_input_clear();
@@ -1557,7 +1705,8 @@ void handle_settings_detail_enter(void) {
 
             target_change_id = id;
 
-            if (chat_list[id].id != 0xFF) {
+            if (chat_list[id].id != 0xFF)
+            {
                 // ID 已存在 → 删除确认
                 current_detail_step = DETAIL_STEP_DEL_CONFIRM;
                 char title_buf[128];
@@ -1566,7 +1715,9 @@ void handle_settings_detail_enter(void) {
                 lv_label_set_text(detail_title_label, title_buf);
                 ui_input_clear();
                 lv_textarea_set_placeholder_text(g_ta, "Type id and alias to confirm...");
-            } else {
+            }
+            else
+            {
                 // ID 不存在 → 添加新联系人
                 current_detail_step = DETAIL_STEP_INPUT_ALIAS;
                 char title_buf[84];
@@ -1582,15 +1733,19 @@ void handle_settings_detail_enter(void) {
     // ==========================================
     // 状态 2: 用户刚刚输入完新 Alias，按下了 ENTER
     // ==========================================
-    else if (current_detail_step == DETAIL_STEP_INPUT_ALIAS) {
+    else if (current_detail_step == DETAIL_STEP_INPUT_ALIAS)
+    {
         // safe_input 就是用户输入的新 alias
-        
+
         // 调用你之前写好的 NVS 保存函数 (它会自动同步内存和 NVS)
         esp_err_t err = nvs_set_alias(target_change_id, safe_input);
-        
-        if (err == ESP_OK) {
+
+        if (err == ESP_OK)
+        {
             ESP_LOGI("SETTINGS", "Successfully updated alias for ID %d to [%s]", target_change_id, safe_input);
-        } else {
+        }
+        else
+        {
             ESP_LOGE("SETTINGS", "Failed to update alias for ID %d", target_change_id);
         }
 
@@ -1598,21 +1753,29 @@ void handle_settings_detail_enter(void) {
         // (这会销毁当前的 DETAIL 页面，重新渲染 SETTINGS 列表页面)
         lv_timer_create(deferred_show_settings_page, 10, NULL);
     }
-    else if (current_detail_step == DETAIL_STEP_DEL_CONFIRM) {
-        if (strlen(safe_input) == 0) return;
+    else if (current_detail_step == DETAIL_STEP_DEL_CONFIRM)
+    {
+        if (strlen(safe_input) == 0)
+            return;
 
         char expected[32];
         snprintf(expected, sizeof(expected), "0x%02X%s", target_change_id, chat_list[target_change_id].alias);
 
-        if (strcmp(safe_input, expected) == 0) {
+        if (strcmp(safe_input, expected) == 0)
+        {
             esp_err_t err = nvs_set_alias(target_change_id, "");
-            if (err == ESP_OK) {
+            if (err == ESP_OK)
+            {
                 ESP_LOGI("SETTINGS", "Deleted contact 0x%02X", target_change_id);
                 lv_label_set_text(detail_title_label, "Contact deleted.");
-            } else {
+            }
+            else
+            {
                 lv_label_set_text(detail_title_label, "Delete failed! Try again.");
             }
-        } else {
+        }
+        else
+        {
             ESP_LOGW("SETTINGS", "Confirm mismatch for delete: [%s] vs [%s]", safe_input, expected);
             lv_label_set_text(detail_title_label, "Mismatch! Deletion cancelled.");
         }
@@ -1622,16 +1785,20 @@ void handle_settings_detail_enter(void) {
     // ==========================================
     // 状态 3: 用户刚刚输入完新 Color，按下了 CONFIRM
     // ==========================================
-    else if (current_detail_step == DETAIL_STEP_INPUT_USER_COLOR) {
+    else if (current_detail_step == DETAIL_STEP_INPUT_USER_COLOR)
+    {
         // safe_input 就是用户输入的新 color
         uint32_t color = strtoul(safe_input, NULL, 16);
-        
+
         // 调用你之前写好的 NVS 保存函数 (它会自动同步内存和 NVS)
         esp_err_t err = nvs_set_user_color(target_change_id, color);
-        
-        if (err == ESP_OK) {
+
+        if (err == ESP_OK)
+        {
             ESP_LOGI("SETTINGS", "Successfully updated color for ID %d to [%s]", target_change_id, safe_input);
-        } else {
+        }
+        else
+        {
             ESP_LOGE("SETTINGS", "Failed to update color for ID %d", target_change_id);
         }
 
@@ -1639,16 +1806,20 @@ void handle_settings_detail_enter(void) {
         // (这会销毁当前的 DETAIL 页面，重新渲染 SETTINGS 列表页面)
         lv_timer_create(deferred_show_settings_page, 10, NULL);
     }
-    else if (current_detail_step == DETAIL_STEP_INPUT_INTERFACE_COLOR) {
+    else if (current_detail_step == DETAIL_STEP_INPUT_INTERFACE_COLOR)
+    {
         // safe_input 就是用户输入的新 color
         uint32_t color = strtoul(safe_input, NULL, 16);
-        
+
         // 调用你之前写好的 NVS 保存函数 (它会自动同步内存和 NVS)
         esp_err_t err = nvs_set_interface_color(target_change_id, color);
-        
-        if (err == ESP_OK) {
+
+        if (err == ESP_OK)
+        {
             ESP_LOGI("SETTINGS", "Successfully updated interface color for ID %d to [%s]", target_change_id, safe_input);
-        } else {
+        }
+        else
+        {
             ESP_LOGE("SETTINGS", "Failed to update interface color for ID %d", target_change_id);
         }
 
@@ -1656,12 +1827,14 @@ void handle_settings_detail_enter(void) {
         // (这会销毁当前的 DETAIL 页面，重新渲染 SETTINGS 列表页面)
         lv_timer_create(deferred_show_settings_page, 10, NULL);
     }
-    else if (current_detail_step == DETAIL_STEP_INPUT_PASSWORD) { // 通过本地SSID+pass配网
+    else if (current_detail_step == DETAIL_STEP_INPUT_PASSWORD)
+    { // 通过本地SSID+pass配网
         // safe_input 就是用户输入的password (密码不能太短 WPA2 至少 8 位)
-        if (strlen(safe_input) < 8) {
+        if (strlen(safe_input) < 8)
+        {
             lv_label_set_text(detail_title_label, "Password too short!\nMin 8 chars.");
             ui_input_clear(); // 清空让用户重试
-            return; // 留在当前步骤，不改变 state
+            return;           // 留在当前步骤，不改变 state
         }
 
         // 2. UI 提示：正在连接 (不阻塞)
@@ -1675,64 +1848,78 @@ void handle_settings_detail_enter(void) {
         wifi_config_t cfg = {0};
         strncpy((char *)cfg.sta.ssid, target_wifi_ssid, sizeof(cfg.sta.ssid) - 1);
         strncpy((char *)cfg.sta.password, safe_input, sizeof(cfg.sta.password) - 1);
-        
+
         esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
-        if (err != ESP_OK) {
+        if (err != ESP_OK)
+        {
             lv_label_set_text(detail_title_label, "Save Config Failed!");
             return;
         }
-        
+
         UIEvent ev = {
             .type = EVENT_WIFI,
-            .wifi_state = WIFI_STATE_CONNECTING_STA
-        };
+            .wifi_state = WIFI_STATE_CONNECTING_STA};
         xQueueSend(appQueue, &ev, 0);
 
-        return; 
+        return;
     }
-    else if (current_detail_step == DETAIL_STEP_CLEAR_FLASH_CONFIRM) {
-        if (strlen(safe_input) == 0) return;
+    else if (current_detail_step == DETAIL_STEP_CLEAR_FLASH_CONFIRM)
+    {
+        if (strlen(safe_input) == 0)
+            return;
 
         char expected[32];
         snprintf(expected, sizeof(expected), "CLEAR FLASH %s", confirm_code);
 
-        if (strcmp(safe_input, expected) == 0) {
+        if (strcmp(safe_input, expected) == 0)
+        {
             lv_label_set_text(detail_title_label, "Erasing flash...\n(may take ~1 min)");
             ui_input_clear();
             lv_timer_handler();
 
             uint32_t flash_sz = ext_flash_size();
             esp_err_t ret = ESP_OK;
-            for (uint32_t addr = 0; addr < flash_sz; addr += 4096) {
+            for (uint32_t addr = 0; addr < flash_sz; addr += 4096)
+            {
                 ret = ext_flash_erase_sector(addr);
-                if (ret != ESP_OK) break;
-                if ((addr / 4096) % 64 == 0) {
+                if (ret != ESP_OK)
+                    break;
+                if ((addr / 4096) % 64 == 0)
+                {
                     vTaskDelay(1);
                 }
             }
 
-            if (ret == ESP_OK) {
+            if (ret == ESP_OK)
+            {
                 meta_init();
                 lv_label_set_text(detail_title_label, "Flash cleared.");
-            } else {
+            }
+            else
+            {
                 lv_label_set_text(detail_title_label, "Erase failed!");
             }
             lv_timer_handler();
             lv_timer_create(deferred_show_settings_page, 5000, NULL);
-        } else {
+        }
+        else
+        {
             ESP_LOGW("SETTINGS", "Confirm mismatch for clear flash: [%s] vs [%s]", safe_input, expected);
             lv_label_set_text(detail_title_label, "Mismatch! Cancelled.");
             ui_input_clear();
             lv_timer_create(deferred_show_settings_page, 2000, NULL);
         }
     }
-    else if (current_detail_step == DETAIL_STEP_CLEAR_NVS_CONFIRM) {
-        if (strlen(safe_input) == 0) return;
+    else if (current_detail_step == DETAIL_STEP_CLEAR_NVS_CONFIRM)
+    {
+        if (strlen(safe_input) == 0)
+            return;
 
         char expected[32];
         snprintf(expected, sizeof(expected), "CLEAR NVS %s", confirm_code);
 
-        if (strcmp(safe_input, expected) == 0) {
+        if (strcmp(safe_input, expected) == 0)
+        {
             lv_label_set_text(detail_title_label, "Clearing NVS...");
             ui_input_clear();
             lv_timer_handler();
@@ -1742,7 +1929,9 @@ void handle_settings_detail_enter(void) {
             lv_timer_handler();
             vTaskDelay(pdMS_TO_TICKS(5000));
             esp_restart();
-        } else {
+        }
+        else
+        {
             ESP_LOGW("SETTINGS", "Confirm mismatch for clear NVS: [%s] vs [%s]", safe_input, expected);
             lv_label_set_text(detail_title_label, "Mismatch! Cancelled.");
             ui_input_clear();
@@ -1751,46 +1940,47 @@ void handle_settings_detail_enter(void) {
     }
 }
 
-void ui_show_settings_detail_page(void) {
+void ui_show_settings_detail_page(void)
+{
     key_set_shifted(false);
     key_set_locked(false);
     update_keyboard_icons();
     switch (selected)
     {
-        case 0:
-            ui_show_settings_change_alias_or_user_color();
-            break;
-        case 1:
-            ui_show_settings_change_alias_or_user_color();
-            break;
-        case 2:
-            ui_show_settings_change_interface_color();
-            break;
-        case 3:
-            ui_show_settings_wifi();
-            break;
-        case 4:
-            ui_show_settings_time();
-            break;
-        case 5:
-            ui_show_settings_sleep_time();
-            break;
-        case 6:
-            ui_show_settings_brightness();
-            break;
-        case 7:
-            ui_show_settings_customize_title();
-            break;
-        case 8:
-            ui_show_settings_add_contact();
-            break;
-        case 9:
-            ui_show_settings_clear_flash();
-            break;
-        case 10:
-            ui_show_settings_clear_nvs();
-            break;
-        default:
-            break;
+    case 0:
+        ui_show_settings_change_alias_or_user_color();
+        break;
+    case 1:
+        ui_show_settings_change_alias_or_user_color();
+        break;
+    case 2:
+        ui_show_settings_change_interface_color();
+        break;
+    case 3:
+        ui_show_settings_wifi();
+        break;
+    case 4:
+        ui_show_settings_time();
+        break;
+    case 5:
+        ui_show_settings_sleep_time();
+        break;
+    case 6:
+        ui_show_settings_brightness();
+        break;
+    case 7:
+        ui_show_settings_customize_title();
+        break;
+    case 8:
+        ui_show_settings_add_contact();
+        break;
+    case 9:
+        ui_show_settings_clear_flash();
+        break;
+    case 10:
+        ui_show_settings_clear_nvs();
+        break;
+    default:
+        break;
     }
 }

@@ -7,7 +7,6 @@ set(src_dirs
             FLASH
             MYNVS
             UI
-            IMAGES
             WIFI
             FONTS
             SLEEP
@@ -23,7 +22,6 @@ set(include_dirs
             FLASH
             MYNVS
             UI
-            IMAGES
             WIFI
             FONTS
             SLEEP

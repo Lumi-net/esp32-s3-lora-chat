@@ -1,11 +1,8 @@
 #include "va.h"
-// #include "types.h"
-
 
 QueueHandle_t appQueue = NULL;
 
-// uint16_t auto_sleep_timeout = 300; // TODO: 暂时调成60 开发方便
-uint16_t auto_sleep_timeout = 60;
+uint16_t auto_sleep_timeout = 300;
 
 uint16_t scr_brightness = 500;
 

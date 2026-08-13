@@ -27,9 +27,10 @@ void pwm_init(void)
 
 void duty_set(uint16_t duty)
 {
-    if (duty > 1023) {
+    if (duty > 1023)
+    {
         duty = 1023;
     }
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, duty); 
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);        
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, duty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
 }

@@ -10,12 +10,10 @@
 #include "va.h"
 #include "types.h"
 
-
-
 #define LORA_MD0 GPIO_NUM_47
 #define LORA_MD1 GPIO_NUM_48
-#define LORA_CHANNEL 0x3C    // 470 MHz
-#define LORA_GROUP   0x00    // Lumi-net组号
+#define LORA_CHANNEL 0x3C // 470 MHz
+#define LORA_GROUP 0x00   // Lumi-net组号
 
 uint8_t self_id = 0x01;
 static uint8_t tx_seq_num = 0;
@@ -60,19 +58,19 @@ static const uint8_t crc8_table[256] = {
     0xAE, 0xA9, 0xA0, 0xA7, 0xB2, 0xB5, 0xBC, 0xBB,
     0x96, 0x91, 0x98, 0x9F, 0x8A, 0x8D, 0x84, 0x83,
     0xDE, 0xD9, 0xD0, 0xD7, 0xC2, 0xC5, 0xCC, 0xCB,
-    0xE6, 0xE1, 0xE8, 0xEF, 0xFA, 0xFD, 0xF4, 0xF3
-};
-
+    0xE6, 0xE1, 0xE8, 0xEF, 0xFA, 0xFD, 0xF4, 0xF3};
 
 // 唤醒 LoRa 模块 (MD0=1, MD1=0)
-void lora_wake() {
+void lora_wake()
+{
     gpio_set_level(LORA_MD0, 1);
     gpio_set_level(LORA_MD1, 0);
     vTaskDelay(pdMS_TO_TICKS(150)); // 等待 T2 (120ms) + 余量，确保模块进入工作状态
 }
 
 // 让 LoRa 模块休眠 (MD0=1, MD1=1)
-void lora_sleep() {
+void lora_sleep()
+{
     vTaskDelay(pdMS_TO_TICKS(30)); // 延时确保串口数据已被 LoRa 模块完整接收
     gpio_set_level(LORA_MD0, 1);
     gpio_set_level(LORA_MD1, 1);
@@ -80,20 +78,22 @@ void lora_sleep() {
 }
 
 // 让 LoRa 模块配置 (MD0=0, MD1=0)
-void lora_config() {
+void lora_config()
+{
     gpio_set_level(LORA_MD0, 0);
     gpio_set_level(LORA_MD1, 0);
     vTaskDelay(pdMS_TO_TICKS(150)); // 等待 T1 (120ms) + 余量，确保模块进入配置状态
 }
 
 // 定点传输
-void lora_config_fixed_point() { 
+void lora_config_fixed_point()
+{
     lora_config();
     // 命令格式: CMD(0x80) + REG(0x07) + LEN(0x02) + VAL(0x00, 0x02)
-    uint8_t cmd[] = {0x80, 0x07, 0x02, 0x00, 0x02}; 
+    uint8_t cmd[] = {0x80, 0x07, 0x02, 0x00, 0x02};
     uart_transmit(cmd, sizeof(cmd));
     vTaskDelay(pdMS_TO_TICKS(200)); // 等待配置完成并保存
-    lora_sleep(); // 配置完成后进入休眠
+    lora_sleep();                   // 配置完成后进入休眠
 }
 
 void uart_init(void)
@@ -104,10 +104,9 @@ void uart_init(void)
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
+        .intr_type = GPIO_INTR_DISABLE};
     gpio_config(&io_conf);
-    
+
     // 初始化为休眠模式
     lora_sleep();
 
@@ -128,16 +127,19 @@ void uart_init(void)
     lora_config_fixed_point();
 }
 
-uint8_t calculateCRC8(const uint8_t* data, uint8_t len) {
+uint8_t calculateCRC8(const uint8_t *data, uint8_t len)
+{
     uint8_t crc = 0; // 初始值
-    for (uint8_t i = 0; i < len; i++) {
+    for (uint8_t i = 0; i < len; i++)
+    {
         crc = crc8_table[crc ^ data[i]];
     }
     return crc;
 }
 
 // ================= 帧构建函数 =================
-uint8_t buildLoRaFrame(uint8_t* buf, uint8_t self_id, uint8_t target_id, const char* data_str) {
+uint8_t buildLoRaFrame(uint8_t *buf, uint8_t self_id, uint8_t target_id, const char *data_str)
+{
     buf[0] = 0xAA;
     buf[1] = 0x55;
     // 1. 随机数 (使用ESP32硬件RNG)
@@ -152,12 +154,15 @@ uint8_t buildLoRaFrame(uint8_t* buf, uint8_t self_id, uint8_t target_id, const c
     gettimeofday(&tv, NULL);
     struct tm *timeinfo = localtime(&tv.tv_sec);
 
-    if (timeinfo->tm_year >= (2024 - 1900)) {
-        buf[5] = timeinfo->tm_mon + 1;   // tm_mon 范围是 0-11，需要 +1
-        buf[6] = timeinfo->tm_mday;        // tm_mday 范围是 1-31
-        buf[7] = timeinfo->tm_hour;       // tm_hour 范围是 0-23
-        buf[8] = timeinfo->tm_min;      // tm_min 范围是 0-59
-    } else {
+    if (timeinfo->tm_year >= (2024 - 1900))
+    {
+        buf[5] = timeinfo->tm_mon + 1; // tm_mon 范围是 0-11，需要 +1
+        buf[6] = timeinfo->tm_mday;    // tm_mday 范围是 1-31
+        buf[7] = timeinfo->tm_hour;    // tm_hour 范围是 0-23
+        buf[8] = timeinfo->tm_min;     // tm_min 范围是 0-59
+    }
+    else
+    {
         // 刚开机? 时间默认是 1970 年，这里填 0
         buf[5] = 0;
         buf[6] = 0;
@@ -168,7 +173,8 @@ uint8_t buildLoRaFrame(uint8_t* buf, uint8_t self_id, uint8_t target_id, const c
 
     // 4. 数据长度 & 数据内容
     size_t len = strlen(data_str);
-    if (len > 120) len = 120;
+    if (len > 120)
+        len = 120;
     buf[9] = (uint8_t)len;
     memcpy(&buf[10], data_str, len);
 
@@ -179,70 +185,83 @@ uint8_t buildLoRaFrame(uint8_t* buf, uint8_t self_id, uint8_t target_id, const c
     return 10 + len + 1; // 返回实际帧总长度
 }
 
-ParseStatus parseLoRaFrame(const uint8_t* buf, uint8_t buf_len, LoRaFrameData* out) {
-    if (!out) return PARSE_ERR_PTR;
-    if (buf_len < 10 + 1) return PARSE_ERR_SHORT; // 至少需要: 10字节头 + 1字节CRC
+ParseStatus parseLoRaFrame(const uint8_t *buf, uint8_t buf_len, LoRaFrameData *out)
+{
+    if (!out)
+        return PARSE_ERR_PTR;
+    if (buf_len < 10 + 1)
+        return PARSE_ERR_SHORT; // 至少需要: 10字节头 + 1字节CRC
 
     uint8_t data_len = buf[9];
     uint8_t expected_len = 10 + data_len + 1;
-    if (buf_len != expected_len) return PARSE_ERR_LEN; // 长度不匹配
+    if (buf_len != expected_len)
+        return PARSE_ERR_LEN; // 长度不匹配
 
     // 校验 CRC8 (从 seq 到 data 末尾, 共 8 + data_len 字节)
     uint8_t calc_crc = calculateCRC8(&buf[2], 8 + data_len);
-    if (calc_crc != buf[10 + data_len]) return PARSE_ERR_CRC;
+    if (calc_crc != buf[10 + data_len])
+        return PARSE_ERR_CRC;
 
     // 填充结构体
     out->seq = buf[2];
-    out->self_id    = buf[3];
-    out->target_id  = buf[4];
-    out->month      = buf[5];
-    out->day        = buf[6];
-    out->hour       = buf[7];
-    out->minute     = buf[8];
-    out->data_len   = data_len;
-    out->checksum   = buf[10 + data_len];
+    out->self_id = buf[3];
+    out->target_id = buf[4];
+    out->month = buf[5];
+    out->day = buf[6];
+    out->hour = buf[7];
+    out->minute = buf[8];
+    out->data_len = data_len;
+    out->checksum = buf[10 + data_len];
 
     // 安全拷贝字符串并添加结束符
-    if (data_len > 0) {
+    if (data_len > 0)
+    {
         memcpy(out->data_str, &buf[10], data_len);
         out->data_str[data_len] = '\0';
-    } else {
+    }
+    else
+    {
         out->data_str[0] = '\0'; // ACK帧没有数据
     }
 
     return PARSE_OK;
 }
 
-void uart_transmit(const uint8_t* data, size_t size) {
+void uart_transmit(const uint8_t *data, size_t size)
+{
     uart_write_bytes(UART_NUM_1, data, size);
 }
 
-void send_ack(uint8_t original_seq, uint8_t original_sender_id) {
+void send_ack(uint8_t original_seq, uint8_t original_sender_id)
+{
     lora_wake();
 
     uint8_t ack_buf[14]; // 3字节路由头 + 11字节ACK帧
-    
+
     // 1. 构造 3字节路由头 (目标组号 + 目标地址 + 信道)
     ack_buf[0] = LORA_GROUP;
     ack_buf[1] = original_sender_id; // ACK 的目标是原发送方
     ack_buf[2] = LORA_CHANNEL;
-    
+
     // 2. 构造 11字节 ACK 帧
     ack_buf[3] = 0xAA;
     ack_buf[4] = 0x55;
-    ack_buf[5] = original_seq;       
-    ack_buf[6] = self_id;               
+    ack_buf[5] = original_seq;
+    ack_buf[6] = self_id;
     ack_buf[7] = original_sender_id;
-    
+
     struct timeval tv;
     gettimeofday(&tv, NULL);
     struct tm *timeinfo = localtime(&tv.tv_sec);
-    if (timeinfo->tm_year >= (2024 - 1900)) {
-        ack_buf[8] = timeinfo->tm_mon + 1;   // tm_mon 范围是 0-11，需要 +1
-        ack_buf[9] = timeinfo->tm_mday;        // tm_mday 范围是 1-31
-        ack_buf[10] = timeinfo->tm_hour;       // tm_hour 范围是 0-23
-        ack_buf[11] = timeinfo->tm_min;      // tm_min 范围是 0-59
-    } else {
+    if (timeinfo->tm_year >= (2024 - 1900))
+    {
+        ack_buf[8] = timeinfo->tm_mon + 1; // tm_mon 范围是 0-11，需要 +1
+        ack_buf[9] = timeinfo->tm_mday;    // tm_mday 范围是 1-31
+        ack_buf[10] = timeinfo->tm_hour;   // tm_hour 范围是 0-23
+        ack_buf[11] = timeinfo->tm_min;    // tm_min 范围是 0-59
+    }
+    else
+    {
         // 刚开机? 时间默认是 1970 年，这里填 0
         ack_buf[8] = 0;
         ack_buf[9] = 0;
@@ -252,11 +271,11 @@ void send_ack(uint8_t original_seq, uint8_t original_sender_id) {
     }
 
     ack_buf[12] = 0; // 数据长度为 0 表示 ACK
-    
+
     // 3. CRC8 校验 (从 seq 到 data_len 共 8 字节)
     uint8_t crc = calculateCRC8(&ack_buf[5], 8);
     ack_buf[13] = crc;
-    
+
     uart_transmit(ack_buf, 14);
 
     ESP_LOGI("UART", "TX ACK -> 0x%02X  seq=0x%02X", original_sender_id, original_seq);
@@ -266,109 +285,114 @@ void send_ack(uint8_t original_seq, uint8_t original_sender_id) {
 
 void uart_parse_byte(uint8_t ch)
 {
-    switch(rx_state)
+    switch (rx_state)
     {
-        case RX_WAIT_AA:
-            if(ch == 0xAA)
+    case RX_WAIT_AA:
+        if (ch == 0xAA)
+        {
+            rx_buf[0] = ch;
+            rx_idx = 1;
+            rx_state = RX_WAIT_55;
+        }
+        break;
+    case RX_WAIT_55:
+        if (ch == 0x55)
+        {
+            rx_buf[1] = ch;
+            rx_idx = 2;
+            rx_state = RX_RECEIVE_HEADER;
+            lora_status = LORA_STATUS_RECEIVING;
+            ESP_LOGI("UART", "RX hdr AA 55 detected");
+        }
+        else
+        {
+            if (ch == 0xAA)
             {
-                rx_buf[0] = ch;
+                rx_buf[0] = 0xAA;
                 rx_idx = 1;
-                rx_state = RX_WAIT_55;
-            }
-            break;
-        case RX_WAIT_55:
-            if(ch == 0x55)
-            {
-                rx_buf[1] = ch;
-                rx_idx = 2;
-                rx_state = RX_RECEIVE_HEADER;
-                lora_status = LORA_STATUS_RECEIVING;
-                ESP_LOGI("UART", "RX hdr AA 55 detected");
             }
             else
             {
-                if (ch == 0xAA) {
-                    rx_buf[0] = 0xAA;
-                    rx_idx = 1;
-                } else {
-                    rx_state = RX_WAIT_AA;
-                }
+                rx_state = RX_WAIT_AA;
             }
-            break;
-        case RX_RECEIVE_HEADER:
-            rx_buf[rx_idx++] = ch;
-            if(rx_idx == 10)       // 2字节帧头 + 8字节协议头
-            {
-                uint8_t len = rx_buf[9];
-                if(len > 120)
-                {
-                    rx_state = RX_WAIT_AA;
-                    rx_idx = 0;
-                    break;
-                }
-                target_len = 2 + 8 + len + 1;
-                rx_state = RX_RECEIVE_DATA;
-            }
-            break;
-        case RX_RECEIVE_DATA:
-            if(rx_idx >= sizeof(rx_buf))
+        }
+        break;
+    case RX_RECEIVE_HEADER:
+        rx_buf[rx_idx++] = ch;
+        if (rx_idx == 10) // 2字节帧头 + 8字节协议头
+        {
+            uint8_t len = rx_buf[9];
+            if (len > 120)
             {
                 rx_state = RX_WAIT_AA;
                 rx_idx = 0;
-                return;
+                break;
             }
-            rx_buf[rx_idx++] = ch;
-            if(rx_idx == target_len)
+            target_len = 2 + 8 + len + 1;
+            rx_state = RX_RECEIVE_DATA;
+        }
+        break;
+    case RX_RECEIVE_DATA:
+        if (rx_idx >= sizeof(rx_buf))
+        {
+            rx_state = RX_WAIT_AA;
+            rx_idx = 0;
+            return;
+        }
+        rx_buf[rx_idx++] = ch;
+        if (rx_idx == target_len)
+        {
+            ParseStatus ret;
+            ret = parseLoRaFrame(
+                rx_buf,
+                target_len,
+                &frame_data);
+            if (ret == PARSE_OK)
             {
-                ParseStatus ret;
-                ret = parseLoRaFrame(
-                        rx_buf,
-                        target_len,
-                        &frame_data);
-                if(ret == PARSE_OK)
+                // 判断帧类型：data_len > 0 为数据帧，data_len == 0 为 ACK 帧
+                ESP_LOGI("UART", "RX frame OK  seq=0x%02X from=0x%02X to=0x%02X len=%d",
+                         frame_data.seq, frame_data.self_id, frame_data.target_id, frame_data.data_len);
+                if (frame_data.data_len > 0)
                 {
-                    // 判断帧类型：data_len > 0 为数据帧，data_len == 0 为 ACK 帧
-                    ESP_LOGI("UART", "RX frame OK  seq=0x%02X from=0x%02X to=0x%02X len=%d",
-                             frame_data.seq, frame_data.self_id, frame_data.target_id, frame_data.data_len);
-                    if (frame_data.data_len > 0) 
+                    // 数据帧：判断 target_id 是否为自己 (如果是广播 target_id=0xFF，可根据需求修改判断条件)
+                    if (frame_data.target_id == self_id)
                     {
-                        // 数据帧：判断 target_id 是否为自己 (如果是广播 target_id=0xFF，可根据需求修改判断条件)
-                        if (frame_data.target_id == self_id) 
-                        {
-                            ESP_LOGI("UART", "RX DATA <- 0x%02X  seq=0x%02X  len=%d  \"%s\"",
-                                     frame_data.self_id, frame_data.seq, frame_data.data_len, frame_data.data_str);
-                            // 发送 ACK 给原发送方
-                            send_ack(frame_data.seq, frame_data.self_id); // 此处self_id即对方发来的自己的ID，ACK中为接收方ID
-                        }
-                        
+                        ESP_LOGI("UART", "RX DATA <- 0x%02X  seq=0x%02X  len=%d  \"%s\"",
+                                 frame_data.self_id, frame_data.seq, frame_data.data_len, frame_data.data_str);
+                        // 发送 ACK 给原发送方
+                        send_ack(frame_data.seq, frame_data.self_id); // 此处self_id即对方发来的自己的ID，ACK中为接收方ID
+                    }
+
+                    UIEvent event;
+                    event.type = EVENT_UART;
+                    event.frame = frame_data;
+                    xQueueSend(appQueue, &event, 0);
+                }
+                else
+                {
+                    // ACK 帧：判断 target_id 是否为自己 (确保是回复给自己的 ACK)
+                    if (frame_data.target_id == self_id)
+                    {
+                        ESP_LOGI("UART", "RX ACK <- 0x%02X  seq=0x%02X",
+                                 frame_data.self_id, frame_data.seq);
                         UIEvent event;
-                        event.type = EVENT_UART;
+                        event.type = EVENT_UART; // 复用 EVENT_UART，应用层通过 data_len == 0 区分
                         event.frame = frame_data;
                         xQueueSend(appQueue, &event, 0);
                     }
-                    else 
-                    {
-                        // ACK 帧：判断 target_id 是否为自己 (确保是回复给自己的 ACK)
-                        if (frame_data.target_id == self_id) 
-                        {
-                            ESP_LOGI("UART", "RX ACK <- 0x%02X  seq=0x%02X",
-                                     frame_data.self_id, frame_data.seq);
-                            UIEvent event;
-                            event.type = EVENT_UART; // 复用 EVENT_UART，应用层通过 data_len == 0 区分
-                            event.frame = frame_data;
-                            xQueueSend(appQueue, &event, 0);
-                        }
-                    }
-                } else {
-                    ESP_LOGI("UART", "RX frame PARSE FAIL (%d)  raw hex:",
-                             ret);
-                    ESP_LOG_BUFFER_HEX("UART", rx_buf, target_len);
-                    lora_status = LORA_STATUS_IDLE;
                 }
-                rx_state = RX_WAIT_AA;
-                rx_idx = 0;
             }
-            break;
+            else
+            {
+                ESP_LOGI("UART", "RX frame PARSE FAIL (%d)  raw hex:",
+                         ret);
+                ESP_LOG_BUFFER_HEX("UART", rx_buf, target_len);
+                lora_status = LORA_STATUS_IDLE;
+            }
+            rx_state = RX_WAIT_AA;
+            rx_idx = 0;
+        }
+        break;
     }
 }
 
@@ -384,19 +408,25 @@ void uart_receive(void *arg)
 }
 
 // 封装带路由头的发送函数 (定点传输核心)
-void send_lora_packet(uint8_t target_id, const uint8_t* frame_buf, uint8_t frame_len) {
+void send_lora_packet(uint8_t target_id, const uint8_t *frame_buf, uint8_t frame_len)
+{
     uint8_t tx_buf[134]; // 3字节路由头 + 最大131字节应用层帧
-    
+
     // 构造 3字节路由头：目标组号 + 目标地址 + 信道
-    if (target_id == 0xFF) {
-        tx_buf[0] = 0xFF; tx_buf[1] = 0xFF; // 广播地址
-    } else {
-        tx_buf[0] = LORA_GROUP; tx_buf[1] = target_id; // 定点地址
+    if (target_id == 0xFF)
+    {
+        tx_buf[0] = 0xFF;
+        tx_buf[1] = 0xFF; // 广播地址
+    }
+    else
+    {
+        tx_buf[0] = LORA_GROUP;
+        tx_buf[1] = target_id; // 定点地址
     }
     tx_buf[2] = LORA_CHANNEL;
-    
+
     memcpy(&tx_buf[3], frame_buf, frame_len);
-    
+
     lora_wake(); // 发送前唤醒模块
     uart_transmit(tx_buf, 3 + frame_len);
     ESP_LOGI("UART", "TX pkt -> 0x%02X  seq=0x%02X  len=%d  \"%.*s\"",
@@ -407,7 +437,8 @@ void send_lora_packet(uint8_t target_id, const uint8_t* frame_buf, uint8_t frame
 static esp_timer_handle_t hb_timer = NULL;
 static uint64_t next_hb_deadline_us = 0;
 
-static void heartbeat_tick(void *arg) {
+static void heartbeat_tick(void *arg)
+{
     uint8_t frame_buf[131];
     uint8_t frame_len = buildLoRaFrame(frame_buf, self_id, 0xFF, "HB");
     send_lora_packet(0xFF, frame_buf, frame_len);
@@ -417,11 +448,11 @@ static void heartbeat_tick(void *arg) {
     esp_timer_start_once(hb_timer, interval_s * 1000000ULL);
 }
 
-void heartbeat_init(void) {
+void heartbeat_init(void)
+{
     esp_timer_create_args_t hb_args = {
         .callback = heartbeat_tick,
-        .name = "hb_timer"
-    };
+        .name = "hb_timer"};
     esp_timer_create(&hb_args, &hb_timer);
 
     uint32_t interval_s = 180 + (esp_random() % 60);
@@ -431,9 +462,11 @@ void heartbeat_init(void) {
     ESP_LOGI("UART", "Heartbeat initialized, first in %" PRIu32 " s", interval_s);
 }
 
-uint64_t heartbeat_get_next_deadline_us(void) {
+uint64_t heartbeat_get_next_deadline_us(void)
+{
     uint64_t now = esp_timer_get_time();
-    if (next_hb_deadline_us <= now) {
+    if (next_hb_deadline_us <= now)
+    {
         uint32_t interval_s = 180 + (esp_random() % 60);
         next_hb_deadline_us = now + (uint64_t)interval_s * 1000000ULL;
         esp_timer_stop(hb_timer);
