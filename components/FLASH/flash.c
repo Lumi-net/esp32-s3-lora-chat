@@ -1,5 +1,6 @@
 #include "flash.h"
 
+#include <stdbool.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/spi_master.h"
@@ -262,6 +263,25 @@ uint32_t chat_storage_scan(void)
     return offset;
 }
 
+static bool is_flash_region_clean(uint32_t addr, size_t len)
+{
+    uint8_t buf[32];
+    while (len > 0)
+    {
+        size_t chunk = (len > sizeof(buf)) ? sizeof(buf) : len;
+        if (ext_flash_read(addr, buf, chunk) != ESP_OK)
+            return false;
+        for (size_t i = 0; i < chunk; i++)
+        {
+            if (buf[i] != 0xFF)
+                return false;
+        }
+        addr += chunk;
+        len -= chunk;
+    }
+    return true;
+}
+
 esp_err_t chat_storage_append(const LoRaFrameData *frame)
 {
     uint16_t fixed = offsetof(LoRaFrameData, data_str);
@@ -273,9 +293,18 @@ esp_err_t chat_storage_append(const LoRaFrameData *frame)
         return ESP_ERR_INVALID_SIZE; // 虽然我也不知道怎么可能会出现这么大的数据，但是AI让我防一下
     }
 
-    // 检测是否需要切换块
+    // 检测是否需要切换块（空间不足）
     if (g_write_offset + record_size > CHAT_BLOCK_SIZE)
     {
+        return chat_switch_block(frame);
+    }
+
+    // 检测目标区域是否有脏数据（上次掉电留下的不完整记录）
+    // NOR Flash 只能 1→0，无法覆盖写入，必须切换到新块
+    uint32_t check_addr = get_active_addr() + g_write_offset;
+    if (!is_flash_region_clean(check_addr, record_size))
+    {
+        ESP_LOGW("FLASH", "Dirty flash at offset %lu, switching block", (unsigned long)g_write_offset);
         return chat_switch_block(frame);
     }
 
