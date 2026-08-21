@@ -12,6 +12,8 @@ static const char *TAG = "NVS";
 #define ALIAS_KEY_PREFIX "a_" // Key 的前缀
 #define MAX_ALIAS_LEN 16      // 昵称最大字符数（不含 \0）
 
+bool heartbeat_enabled = true; // 默认开启心跳
+
 esp_err_t nvs_init(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -614,4 +616,59 @@ esp_err_t nvs_erase_all_partition(void)
         ESP_LOGE(TAG, "nvs_flash_erase failed: %s", esp_err_to_name(ret));
     }
     return ret;
+}
+
+esp_err_t nvs_set_heartbeat_enabled(bool enabled)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Error opening NVS handle: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    uint8_t val = enabled ? 1 : 0;
+    err = nvs_set_u8(handle, "hb", val);
+
+    if (err == ESP_OK)
+    {
+        heartbeat_enabled = enabled;
+        ESP_LOGI(TAG, "Saved Heartbeat Enabled: %d to NVS and RAM", enabled);
+    }
+
+    if (err == ESP_OK)
+    {
+        nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return err;
+}
+
+void nvs_read_heartbeat_enabled(void)
+{
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to open NVS for heartbeat enabled read");
+        return;
+    }
+
+    uint8_t val = 1; // 默认开启
+    esp_err_t err = nvs_get_u8(handle, "hb", &val);
+    if (err == ESP_OK)
+    {
+        heartbeat_enabled = (val == 1);
+        ESP_LOGI(TAG, "Read Heartbeat Enabled: %d", heartbeat_enabled);
+    }
+    else if (err == ESP_ERR_NVS_NOT_FOUND)
+    {
+        ESP_LOGI(TAG, "Key 'hb' not found in NVS, using default: %d", heartbeat_enabled);
+    }
+    else
+    {
+        ESP_LOGW(TAG, "Failed to get u8 for key: %s", "hb");
+    }
+
+    nvs_close(handle);
 }

@@ -15,6 +15,7 @@ uint8_t buildLoRaFrame(uint8_t* buf, uint8_t self_id, uint8_t target_id, const c
 ParseStatus parseLoRaFrame(const uint8_t* buf, uint8_t buf_len, LoRaFrameData* out);
 void send_lora_packet(uint8_t target_id, const uint8_t* frame_buf, uint8_t frame_len);
 void heartbeat_init(void);
+void heartbeat_stop(void);
 uint64_t heartbeat_get_next_deadline_us(void);
 
 #endif

@@ -17,9 +17,11 @@ extern lv_obj_t *title_label;
 extern lv_obj_t *shift_icon_obj;
 extern lv_obj_t *lock_icon_obj;
 extern lv_obj_t *lora_status_indicator;
+extern lv_obj_t *heartbeat_status_indicator;
 
 void update_keyboard_icons(void);
 void update_lora_status_indicator(void);
+void update_heartbeat_status_indicator(void);
 
 void ui_init(void);
 void lvgl_flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map);

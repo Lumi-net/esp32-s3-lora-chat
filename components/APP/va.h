@@ -14,5 +14,6 @@ extern page_id_t current_page_id;
 extern LoRaStatus lora_status;
 extern uint8_t ack_timeout_count;
 extern char status_title[17];
+extern bool heartbeat_enabled;
 
 #endif

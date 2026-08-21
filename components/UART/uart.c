@@ -439,6 +439,11 @@ static uint64_t next_hb_deadline_us = 0;
 
 static void heartbeat_tick(void *arg)
 {
+    if (!heartbeat_enabled)
+    {
+        return; // 心跳已禁用，不发送
+    }
+
     uint8_t frame_buf[131];
     uint8_t frame_len = buildLoRaFrame(frame_buf, self_id, 0xFF, "HB");
     send_lora_packet(0xFF, frame_buf, frame_len);
@@ -450,6 +455,12 @@ static void heartbeat_tick(void *arg)
 
 void heartbeat_init(void)
 {
+    if (!heartbeat_enabled)
+    {
+        ESP_LOGI("UART", "Heartbeat disabled, skipping initialization");
+        return;
+    }
+
     esp_timer_create_args_t hb_args = {
         .callback = heartbeat_tick,
         .name = "hb_timer"};
@@ -462,8 +473,23 @@ void heartbeat_init(void)
     ESP_LOGI("UART", "Heartbeat initialized, first in %" PRIu32 " s", interval_s);
 }
 
+void heartbeat_stop(void)
+{
+    if (hb_timer != NULL)
+    {
+        esp_timer_stop(hb_timer);
+        next_hb_deadline_us = 0;
+        ESP_LOGI("UART", "Heartbeat timer stopped");
+    }
+}
+
 uint64_t heartbeat_get_next_deadline_us(void)
 {
+    if (!heartbeat_enabled)
+    {
+        return 0; // 心跳已禁用，返回0表示没有定时器唤醒
+    }
+
     uint64_t now = esp_timer_get_time();
     if (next_hb_deadline_us <= now)
     {

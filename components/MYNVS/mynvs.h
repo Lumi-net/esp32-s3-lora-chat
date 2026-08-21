@@ -16,3 +16,5 @@ esp_err_t nvs_set_status_title(const char *title);
 void nvs_read_status_title(void);
 void nvs_dump_all(void);
 esp_err_t nvs_erase_all_partition(void);
+esp_err_t nvs_set_heartbeat_enabled(bool enabled);
+void nvs_read_heartbeat_enabled(void);

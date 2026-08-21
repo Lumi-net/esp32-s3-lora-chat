@@ -38,7 +38,8 @@ typedef enum
     DETAIL_STEP_INPUT_PASSWORD,
     DETAIL_STEP_DEL_CONFIRM,
     DETAIL_STEP_CLEAR_FLASH_CONFIRM,
-    DETAIL_STEP_CLEAR_NVS_CONFIRM
+    DETAIL_STEP_CLEAR_NVS_CONFIRM,
+    DETAIL_STEP_HEARTBEAT_ENABLE
 } detail_step_t;
 
 // 聊天页面状态管理（静态变量，仅当前聊天页有效）
@@ -58,6 +59,7 @@ lv_obj_t *input_cnt_left = NULL;
 uint8_t input_remaining_chars = 120;
 lv_obj_t *page_cursor = NULL;
 lv_obj_t *lora_status_indicator = NULL;
+lv_obj_t *heartbeat_status_indicator = NULL;
 lv_obj_t *shift_icon_obj = NULL;
 lv_obj_t *lock_icon_obj = NULL;
 lv_obj_t *soc_label = NULL;
@@ -98,6 +100,7 @@ static const char *settings_items[] = {
     "Add/Remove a contact",
     "Clear Chat History",
     "Clear NVS Data",
+    "Heartbeat Enable",
     "-- Placeholder C --",
 };
 
@@ -234,6 +237,17 @@ void create_ui(void)
     lv_obj_set_style_bg_color(lora_status_indicator, lv_palette_main(LV_PALETTE_GREEN), 0);
     lv_obj_align(lora_status_indicator, LV_ALIGN_RIGHT_MID, -48, 0);
 
+    /* 状态栏：心跳状态指示小方块（橙色，心跳关闭时显示） */
+    heartbeat_status_indicator = lv_obj_create(status_bar);
+    lv_obj_remove_style_all(heartbeat_status_indicator);
+    lv_obj_set_size(heartbeat_status_indicator, 8, 8);
+    lv_obj_set_style_radius(heartbeat_status_indicator, 1, 0);
+    lv_obj_set_style_bg_opa(heartbeat_status_indicator, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(heartbeat_status_indicator, lv_palette_main(LV_PALETTE_ORANGE), 0);
+    lv_obj_align(heartbeat_status_indicator, LV_ALIGN_RIGHT_MID, -38, 0);
+    // 默认隐藏，心跳开启时隐藏，关闭时显示
+    lv_obj_add_flag(heartbeat_status_indicator, LV_OBJ_FLAG_HIDDEN);
+
     /* 状态栏文字：电池图标 */
     soc_label = lv_label_create(status_bar);
     lv_label_set_text(soc_label, "100%");
@@ -353,6 +367,9 @@ void create_ui(void)
     lv_obj_set_flex_grow(g_ta, 1);
     lv_obj_set_style_text_align(g_ta, LV_TEXT_ALIGN_LEFT, LV_STATE_DEFAULT);
     lv_obj_add_state(g_ta, LV_STATE_FOCUSED);
+    
+    // 初始化心跳状态指示灯
+    update_heartbeat_status_indicator();
 }
 
 static void ui_input_clear(void)
@@ -473,6 +490,23 @@ void update_lora_status_indicator(void)
         break;
     }
     lv_obj_set_style_bg_color(lora_status_indicator, color, 0);
+}
+
+void update_heartbeat_status_indicator(void)
+{
+    if (!heartbeat_status_indicator)
+        return;
+    
+    if (heartbeat_enabled)
+    {
+        // 心跳开启，隐藏橙色指示灯
+        lv_obj_add_flag(heartbeat_status_indicator, LV_OBJ_FLAG_HIDDEN);
+    }
+    else
+    {
+        // 心跳关闭，显示橙色指示灯
+        lv_obj_remove_flag(heartbeat_status_indicator, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 // ==========================================
@@ -1407,6 +1441,32 @@ void ui_show_settings_clear_nvs(void)
     lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
 }
 
+void ui_show_settings_heartbeat_enable(void)
+{
+    if (cur_page)
+    {
+        lv_obj_delete(cur_page);
+        cur_page = NULL;
+    }
+
+    cur_page = lv_obj_create(page_container);
+    lv_obj_remove_style_all(cur_page);
+    lv_obj_set_size(cur_page, lv_pct(100), lv_pct(100));
+
+    current_page_id = PAGE_SETTINGS_DETAIL;
+    current_detail_step = DETAIL_STEP_HEARTBEAT_ENABLE;
+
+    detail_title_label = lv_label_create(cur_page);
+    char title_buf[64];
+    snprintf(title_buf, sizeof(title_buf), "Heartbeat: %s\nPress ENTER to toggle", heartbeat_enabled ? "ON" : "OFF");
+    lv_label_set_text(detail_title_label, title_buf);
+    lv_obj_set_style_text_color(detail_title_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
+    lv_obj_set_style_text_font(detail_title_label, &jbm14, 0);
+    lv_obj_set_width(detail_title_label, 220);
+    lv_label_set_long_mode(detail_title_label, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_align(detail_title_label, LV_ALIGN_TOP_MID, 0, 30);
+}
+
 void handle_settings_detail_enter(void)
 {
     // 1. 确保我们在正确的页面
@@ -1938,6 +1998,38 @@ void handle_settings_detail_enter(void)
             lv_timer_create(deferred_show_settings_page, 2000, NULL);
         }
     }
+    else if (current_detail_step == DETAIL_STEP_HEARTBEAT_ENABLE)
+    {
+        // Toggle heartbeat enabled state
+        bool new_state = !heartbeat_enabled;
+        esp_err_t err = nvs_set_heartbeat_enabled(new_state);
+        if (err == ESP_OK)
+        {
+            ESP_LOGI("SETTINGS", "Heartbeat toggled to: %d", new_state);
+            // Update UI to show new state
+            char title_buf[64];
+            snprintf(title_buf, sizeof(title_buf), "Heartbeat: %s\nPress ENTER to toggle", new_state ? "ON" : "OFF");
+            lv_label_set_text(detail_title_label, title_buf);
+            // Update heartbeat timer based on new state
+            if (new_state)
+            {
+                heartbeat_init(); // Re-enable heartbeat timer
+            }
+            else
+            {
+                heartbeat_stop(); // Stop heartbeat timer
+            }
+            // Update heartbeat status indicator
+            update_heartbeat_status_indicator();
+        }
+        else
+        {
+            ESP_LOGW("SETTINGS", "Failed to toggle heartbeat");
+            lv_label_set_text(detail_title_label, "Failed to save!");
+        }
+        ui_input_clear();
+        lv_timer_create(deferred_show_settings_page, 2000, NULL);
+    }
 }
 
 void ui_show_settings_detail_page(void)
@@ -1979,6 +2071,9 @@ void ui_show_settings_detail_page(void)
         break;
     case 10:
         ui_show_settings_clear_nvs();
+        break;
+    case 11:
+        ui_show_settings_heartbeat_enable();
         break;
     default:
         break;

@@ -678,9 +678,13 @@ void app_main_task(void *arg)
 
                 if (is_system_idle && should_sleep)
                 {
-                    uint64_t hb_deadline = heartbeat_get_next_deadline_us();
-                    uint64_t now_us = esp_timer_get_time();
-                    uint64_t timer_us = (hb_deadline > now_us) ? (hb_deadline - now_us) : 0;
+                    uint64_t timer_us = 0;
+                    if (heartbeat_enabled)
+                    {
+                        uint64_t hb_deadline = heartbeat_get_next_deadline_us();
+                        uint64_t now_us = esp_timer_get_time();
+                        timer_us = (hb_deadline > now_us) ? (hb_deadline - now_us) : 0;
+                    }
                     int wakeup_src = enter_light_sleep(timer_us);
                     if (wakeup_src == 2 || wakeup_src == 3)
                     {
@@ -805,6 +809,8 @@ void peripheral_init_task(void *arg)
     nvs_read_brightness();
     ESP_LOGI("NVS", "Reading NVS...");
     nvs_read_status_title();
+    ESP_LOGI("NVS", "Reading NVS...");
+    nvs_read_heartbeat_enabled();
     nvs_dump_all();
     vTaskDelay(pdMS_TO_TICKS(50));
     async_boot_label("Restoring Flash Offset...");
