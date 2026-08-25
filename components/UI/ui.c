@@ -778,6 +778,7 @@ void ui_show_chat_page(uint8_t target_id)
         lv_obj_t *empty_label = lv_label_create(g_chat_scroll_container);
         lv_label_set_text(empty_label, "No messages");
         lv_obj_set_style_text_color(empty_label, lv_color_hex(0x666666), 0);
+        lv_obj_set_style_text_font(empty_label, &jbm12, 0);
         lv_obj_center(empty_label);
     }
 }
@@ -937,6 +938,7 @@ void ui_show_menu_page(void)
         lv_obj_t *empty_label = lv_label_create(cur_page);
         lv_label_set_text(empty_label, "No Contacts");
         lv_obj_set_style_text_color(empty_label, lv_color_hex(color_index[COLOR_MSG_TEXT].color), 0);
+        lv_obj_set_style_text_font(empty_label, &jbm12, 0);
         lv_obj_center(empty_label);
         return; // 直接返回，不创建列表项
     }
@@ -1241,6 +1243,7 @@ void ui_show_settings_change_interface_color(void)
     COLOR_STATUS_BAR= 4,\n\
     COLOR_TEXTAREA_BACKGROUND = 5");
     lv_obj_set_style_text_color(detail_hint_label, lv_color_hex(0x888888), 0);
+    lv_obj_set_style_text_font(detail_hint_label, &jbm12, 0);
     lv_obj_align(detail_hint_label, LV_ALIGN_BOTTOM_MID, 0, -40);
 }
 

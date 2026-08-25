@@ -20,6 +20,7 @@
 #include "sleep.h"
 #include "mynvs.h"
 #include "wifi.h"
+#include "jbm12.h"
 
 #define INIT_DONE_BIT (1 << 0)             // 定义初始化完成的事件位
 #define ACK_TIMEOUT_MS 3000                // ACK 超时时间为 3 秒
@@ -850,6 +851,7 @@ void app_main(void)
 
     boot_text_label = lv_label_create(scr_loading);
     lv_label_set_text(boot_text_label, "System Booting...");
+    lv_obj_set_style_text_font(boot_text_label, &jbm12, 0);
     lv_obj_center(boot_text_label);
     lv_obj_align_to(
         boot_text_label,
